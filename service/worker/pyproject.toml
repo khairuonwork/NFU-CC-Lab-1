@@ -1,0 +1,9 @@
+[project]
+name = "cc-worker"
+version = "0.1.0"
+description = "Generic worker service for the Cloud Computing distributed AI lab"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
