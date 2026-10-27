@@ -1,5 +1,0 @@
----
-# ansible_user: nodemaster
-#
-# ansible_ssh_common_args: >-
-#     -o ProxyJump=khairuonlab@100.94.204.62

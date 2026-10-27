@@ -1,8 +1,0 @@
----
-- name: Deploy controller service on Nodemaster
-  hosts: nodemaster
-  become: true
-  gather_facts: false
-
-  roles:
-    - master_controller
