@@ -1,0 +1,27 @@
+# Node.js
+node_modules/
+.npm/
+dist/
+.build/
+.svelte-kit/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Ansible local state
+infra/ansible/.vault-pass
+infra/ansible/.venv/
+infra/ansible/collections/
+infra/ansible/inventory/lab.yml
+
+# Operating system and editor files
+.DS_Store
+.vscode/
+.idea/

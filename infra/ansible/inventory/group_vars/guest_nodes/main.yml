@@ -1,0 +1,3 @@
+---
+ansible_ssh_common_args: >-
+  -o ProxyJump={{ lab_jump_user }}@{{ lab_jump_host }}

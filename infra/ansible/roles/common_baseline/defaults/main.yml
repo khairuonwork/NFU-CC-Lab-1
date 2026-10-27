@@ -1,0 +1,12 @@
+---
+common_baseline_packages:
+    - ca-certificates
+    - curl
+    - git
+    - htop
+    - jq
+    - unzip
+
+common_baseline_deploy_root: /opt/cc-lab
+
+common_baseline_minimum_swap_mb: 4095

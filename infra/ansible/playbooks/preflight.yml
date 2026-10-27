@@ -1,0 +1,61 @@
+---
+- name: Collect baseline information from all lab nodes
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Read uptime
+      ansible.builtin.command:
+        cmd: uptime -p
+      register: uptime_result
+      changed_when: false
+
+    - name: Read root filesystem capacity
+      ansible.builtin.command:
+        cmd: df -h /
+      register: root_filesystem
+      changed_when: false
+
+    - name: Read Docker Engine version when available
+      ansible.builtin.command:
+        cmd: docker --version
+      register: docker_version
+      changed_when: false
+      failed_when: false
+
+    - name: Read Docker Compose version when available
+      ansible.builtin.command:
+        cmd: docker compose version
+      register: docker_compose_version
+      changed_when: false
+      failed_when: false
+
+    - name: Show node baseline
+      ansible.builtin.debug:
+        msg:
+          inventory_name: "{{ inventory_hostname }}"
+          hostname: "{{ ansible_facts['hostname'] }}"
+          operating_system: >-
+            {{ ansible_facts['distribution'] }}
+            {{ ansible_facts['distribution_version'] }}
+          kernel: "{{ ansible_facts['kernel'] }}"
+          ipv4_addresses: >-
+            {{ ansible_facts['all_ipv4_addresses'] | join(', ') }}
+          vcpus: "{{ ansible_facts['processor_vcpus'] }}"
+          memory_mb: "{{ ansible_facts['memtotal_mb'] }}"
+          swap_total_mb: "{{ ansible_facts['swaptotal_mb'] }}"
+          swap_free_mb: "{{ ansible_facts['swapfree_mb'] }}"
+          uptime: "{{ uptime_result.stdout }}"
+          root_filesystem: "{{ root_filesystem.stdout_lines }}"
+          docker_engine: >-
+            {{
+              docker_version.stdout
+              if docker_version.rc == 0
+              else 'not installed'
+            }}
+          docker_compose: >-
+            {{
+              docker_compose_version.stdout
+              if docker_compose_version.rc == 0
+              else 'not installed'
+            }}

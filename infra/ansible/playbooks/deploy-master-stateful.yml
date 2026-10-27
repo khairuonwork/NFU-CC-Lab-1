@@ -1,0 +1,8 @@
+---
+- name: Deploy NodeMaster stateful services
+  hosts: master_nodes
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: master_stateful

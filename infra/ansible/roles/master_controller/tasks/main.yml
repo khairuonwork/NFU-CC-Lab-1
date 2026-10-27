@@ -1,0 +1,72 @@
+---
+- name: Create controller application directory
+  ansible.builtin.file:
+    path: "{{ master_controller_deploy_root }}/service/controller/app"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create Docker configuration directory
+  ansible.builtin.file:
+    path: "{{ master_controller_deploy_root }}/infra/docker"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copy controller Python application
+  ansible.builtin.copy:
+    src: >-
+      {{ master_controller_repository_root }}/service/controller/app/
+    dest: >-
+      {{ master_controller_deploy_root }}/service/controller/app/
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Copy controller Python dependencies
+  ansible.builtin.copy:
+    src: "{{ master_controller_source_dir }}/requirements.txt"
+    dest: >-
+      {{ master_controller_deploy_root }}/service/controller/requirements.txt
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Copy controller Dockerfile
+  ansible.builtin.copy:
+    src: >-
+      {{ master_controller_repository_root }}/infra/docker/controller.dockerfile
+    dest: >-
+      {{ master_controller_deploy_root }}/infra/docker/controller.dockerfile
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Copy Docker build exclusions
+  ansible.builtin.copy:
+    src: "{{ master_controller_repository_root }}/.dockerignore"
+    dest: "{{ master_controller_deploy_root }}/.dockerignore"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Copy controller Compose configuration
+  ansible.builtin.copy:
+    src: "{{ master_controller_compose_source_dir }}/controller.yml"
+    dest: "{{ master_controller_compose_dir }}/controller.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Build and start controller with stateful services
+  community.docker.docker_compose_v2:
+    project_src: "{{ master_controller_compose_dir }}"
+    project_name: "{{ master_controller_compose_project_name }}"
+    files: "{{ master_controller_compose_files }}"
+    state: present
+    pull: missing
+    build: always
+    wait: true
+    wait_timeout: 180

@@ -1,0 +1,14 @@
+---
+master_stateful_compose_dir: /opt/cc-lab/compose/master
+master_stateful_compose_source_dir: >-
+  {{ playbook_dir }}/../../compose/master
+
+master_stateful_project_name: cc-master
+master_stateful_network_name: cc_master_internal
+
+master_stateful_compose_files:
+  - postgres.yml
+  - redis.yml
+  - object-storage.yml
+
+master_stateful_rustfs_region: tw-taipei-1

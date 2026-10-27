@@ -1,0 +1,63 @@
+---
+- name: Verify supported operating system
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+    fail_msg: This role supports Ubuntu guest nodes only.
+
+- name: Install common baseline packages
+  ansible.builtin.apt:
+    name: "{{ common_baseline_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create common deployment root directory
+  ansible.builtin.file:
+    path: "{{ common_baseline_deploy_root }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Create common deployment subdirectories
+  ansible.builtin.file:
+    path: "{{ common_baseline_deploy_root }}/{{ item }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+  loop:
+    - compose
+    - data
+    - logs
+    - releases
+  loop_control:
+    label: "{{ common_baseline_deploy_root }}/{{ item }}"
+
+- name: Verify active swap capacity
+  ansible.builtin.assert:
+    that:
+      - >-
+        (ansible_facts['swaptotal_mb'] | int) >=
+        (common_baseline_minimum_swap_mb | int)
+    fail_msg: >-
+      Active swap is {{ ansible_facts['swaptotal_mb'] }} MiB, but this lab
+      requires at least {{ common_baseline_minimum_swap_mb }} MiB.
+    success_msg: >-
+      Active swap is {{ ansible_facts['swaptotal_mb'] }} MiB and meets the
+      minimum requirement of {{ common_baseline_minimum_swap_mb }} MiB.
+
+- name: Read active swap devices
+  ansible.builtin.command:
+    cmd: swapon --show --noheadings
+  register: common_baseline_swapon
+  changed_when: false
+
+- name: Show common baseline result
+  ansible.builtin.debug:
+    msg:
+      deployment_root: "{{ common_baseline_deploy_root }}"
+      installed_packages: "{{ common_baseline_packages }}"
+      active_swap_mb: "{{ ansible_facts['swaptotal_mb'] }}"
+      active_swap_devices: "{{ common_baseline_swapon.stdout_lines }}"

@@ -1,0 +1,57 @@
+---
+services:
+  controller:
+    build:
+      context: /opt/cc-lab
+      dockerfile: infra/docker/controller.dockerfile
+
+    image: cc/controller:0.1.0
+    restart: unless-stopped
+
+    environment:
+      CONTROLLER_NAME: cc-controller
+      CONTROLLER_ENVIRONMENT: production
+
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+
+      RUSTFS_HEALTH_URL: http://rustfs:9000/health
+
+    ports:
+      - "8000:8000"
+
+    networks:
+      - master_internal
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  master_internal:
+    external: true
+    name: cc_master_internal

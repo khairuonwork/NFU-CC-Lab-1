@@ -1,0 +1,8 @@
+---
+- name: Check connectivity to lab nodes
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Verify Ansible can reach this node
+      ansible.builtin.ping:
