@@ -4,10 +4,8 @@ import boto3
 
 from app.core.config import Settings
 
-
+# Create the S3-compatible RustFS client
 def create_rustfs_client(settings: Settings) -> Any:
-    """Create an S3-compatible client for RustFS."""
-
     return boto3.client(
         "s3",
         endpoint_url=settings.rustfs_endpoint_url,

@@ -3,7 +3,11 @@ name = "cc-worker"
 version = "0.1.0"
 description = "Generic worker service for the Cloud Computing distributed AI lab"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "boto3>=1.43.120",
+    "pydantic-settings>=2.16.1",
+    "redis>=8.1.0",
+]
 
 [tool.uv]
 package = false

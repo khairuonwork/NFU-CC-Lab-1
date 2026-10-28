@@ -1,14 +1,12 @@
 from fastapi import FastAPI
 
+from app.api.routes.inference import router as inference_router
 from app.api.routes.system import router as system_router
 from app.core.config import get_settings
 from app.services.redis_client import create_redis_client
 from app.services.rustfs_client import create_rustfs_client
 
-
 class ApplicationLifespan:
-    """Manage resources shared by every request in this FastAPI application."""
-
     def __init__(self, app: FastAPI) -> None:
         self.app = app
 
@@ -21,10 +19,8 @@ class ApplicationLifespan:
     async def __aexit__(self, *_: object) -> None:
         await self.app.state.redis.aclose()
 
-
 def lifespan(app: FastAPI) -> ApplicationLifespan:
     return ApplicationLifespan(app)
-
 
 settings = get_settings()
 
@@ -35,3 +31,4 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(system_router)
+app.include_router(inference_router)

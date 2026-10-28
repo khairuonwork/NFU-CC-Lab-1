@@ -7,7 +7,6 @@ from app.core.config import get_settings
 
 router = APIRouter(tags=["System"])
 
-
 @router.get("/")
 async def root() -> dict[str, str]:
     settings = get_settings()
@@ -17,11 +16,9 @@ async def root() -> dict[str, str]:
         "documentation": "/docs",
     }
 
-
 @router.get("/health/live")
 async def health_live() -> dict[str, str]:
     return {"status": "alive"}
-
 
 @router.get("/health/ready")
 async def health_ready(request: Request) -> JSONResponse:
