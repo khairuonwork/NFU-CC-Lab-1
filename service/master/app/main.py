@@ -1,6 +1,3 @@
-from contextlib import asynccontextmanager
-from typing import AsyncIterator
-
 from fastapi import FastAPI
 
 from app.api.routes.system import router as system_router
@@ -9,16 +6,24 @@ from app.services.redis_client import create_redis_client
 from app.services.rustfs_client import create_rustfs_client
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    settings = get_settings()
+class ApplicationLifespan:
+    """Manage resources shared by every request in this FastAPI application."""
 
-    app.state.redis = create_redis_client(settings.redis_url)
-    app.state.rustfs = create_rustfs_client(settings)
+    def __init__(self, app: FastAPI) -> None:
+        self.app = app
 
-    yield
+    async def __aenter__(self) -> None:
+        settings = get_settings()
 
-    await app.state.redis.aclose()
+        self.app.state.redis = create_redis_client(settings.redis_url)
+        self.app.state.rustfs = create_rustfs_client(settings)
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.app.state.redis.aclose()
+
+
+def lifespan(app: FastAPI) -> ApplicationLifespan:
+    return ApplicationLifespan(app)
 
 
 settings = get_settings()
