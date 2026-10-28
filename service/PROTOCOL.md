@@ -137,6 +137,26 @@ A failed result has `status: "failed"` and an `error` string instead of classifi
 
 A worker acknowledges a Stream message only after it has written its Redis result. If the worker process stops first, that message stays pending in its Consumer Group. On restart, the worker uses `XAUTOCLAIM` to reclaim one pending message that has been idle for at least `CC_PENDING_JOB_RECLAIM_IDLE_MS`. If the result already exists, it only acknowledges the old message; otherwise it processes the job normally.
 
+## Model contract
+
+Every worker runs a MobileNetV3-Small ONNX model with the same versioned contract. Worker model files are separate objects, for example `models/node1/current.onnx` and `models/node2/current.onnx`, but their input and output rules must match.
+
+| Field | Value |
+| --- | --- |
+| Model input | RGB image tensor in NCHW order |
+| Input shape | `1 × 3 × 224 × 224` |
+| Value range before normalization | `0.0` to `1.0` |
+| Mean | `(0.485, 0.456, 0.406)` |
+| Standard deviation | `(0.229, 0.224, 0.225)` |
+| Class `0` | `organic` |
+| Class `1` | `anorganic` |
+| Class `2` | `electronic` |
+| Model output | Raw logits with shape `1 × 3` |
+
+The training and ONNX export pipeline must preserve this exact class order. Ensemble averaging is valid only when both workers use compatible label indexes and preprocessing.
+
 ## Worker cache
 
 Before inference, a worker downloads `image_key` to `CC_WORKER_CACHE_DIR`. The cache is a temporary local copy only. The worker removes the file after it produces either a successful or failed result, so RustFS remains the source of truth for the uploaded image.
+
+A model is cached separately under `CC_MODEL_CACHE_DIR`. The default is temporary storage. Docker deployment may mount this directory as a volume when model reuse across restarts is needed; RustFS remains the source of truth and `CC_MODEL_KEY` identifies the desired artifact.

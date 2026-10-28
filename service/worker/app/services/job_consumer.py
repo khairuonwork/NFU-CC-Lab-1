@@ -7,6 +7,7 @@ from app.core.config import Settings
 from app.handlers.inference import run_inference
 from app.schemas.inference_contract import InferenceJob, InferenceResult
 from app.services.heartbeat import WorkerRuntime, WorkerState
+from app.services.model_runtime import OnnxImageClassifier
 
 # Create the Consumer Group once and ignore an existing group.
 async def ensure_consumer_group(redis: Redis, stream_key: str, group_name: str) -> None:
@@ -42,6 +43,7 @@ async def consume_inference_jobs(
     settings: Settings,
     runtime: WorkerRuntime,
     rustfs: object,
+    classifier: OnnxImageClassifier,
 ) -> None:
     stream_key = f"cc:queue:{settings.worker_id}"
     await ensure_consumer_group(redis, stream_key, settings.consumer_group_name)
@@ -58,6 +60,7 @@ async def consume_inference_jobs(
                 stream_key,
                 message_id,
                 fields,
+                classifier,
             )
             continue
 
@@ -81,6 +84,7 @@ async def consume_inference_jobs(
                     stream_key,
                     message_id,
                     fields,
+                    classifier,
                 )
 
 # Process one message or acknowledge it when its result already exists.
@@ -92,6 +96,7 @@ async def _process_message(
     stream_key: str,
     message_id: str,
     fields: dict[str, str],
+    classifier: OnnxImageClassifier,
 ) -> None:
     job = InferenceJob.model_validate_json(fields["payload"])
     result_key = f"cc:result:{job.job_id}:{settings.worker_id}"
@@ -105,7 +110,13 @@ async def _process_message(
     await redis.hset(f"cc:job:{job.job_id}", mapping={"status": "processing"})
 
     try:
-        result = await run_inference(job, settings.worker_id, rustfs, settings)
+        result = await run_inference(
+            job,
+            settings.worker_id,
+            rustfs,
+            settings,
+            classifier,
+        )
     except Exception as error:
         result = InferenceResult(
             job_id=job.job_id,

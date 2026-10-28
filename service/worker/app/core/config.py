@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     rustfs_region: str = "ap-east-1"
     rustfs_bucket: str = "cc-lab"
     worker_cache_dir: Path = Path("/tmp/cc-worker-cache")
+    model_key: str = "models/node1/current.onnx"
+    model_cache_dir: Path = Path("/tmp/cc-worker-model-cache")
 
     model_config = SettingsConfigDict(
         env_file=".env",
