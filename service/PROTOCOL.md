@@ -19,6 +19,46 @@ Version 1 covers inference only. Training will use a separate contract after the
 
 A worker refreshes its own `cc:worker:<worker-id>` key. The master treats a missing key as offline.
 
+## Worker availability for the UI
+
+The UI calls `GET /inference/workers` before enabling an execution button. The Master reads both heartbeat hashes and their short reservation keys, then returns the worker state currently usable for dispatching.
+
+```json
+{
+  "workers": [
+    {
+      "worker_id": "node1",
+      "state": "idle",
+      "available": true,
+      "last_seen_at": "2026-10-28T10:00:00+00:00",
+      "current_job_id": null
+    },
+    {
+      "worker_id": "node2",
+      "state": "training",
+      "available": false,
+      "last_seen_at": "2026-10-28T10:00:00+00:00",
+      "current_job_id": "4dc597d5-2147-459c-a84d-b7159c188071"
+    }
+  ],
+  "available_workers": 1,
+  "execution_modes": {
+    "load_balance": {
+      "enabled": true,
+      "required_workers": 1,
+      "available_workers": 1
+    },
+    "ensemble": {
+      "enabled": false,
+      "required_workers": 2,
+      "available_workers": 1
+    }
+  }
+}
+```
+
+A worker with an active dispatch reservation is reported as `reserved`, even if its last heartbeat still says `idle`. This prevents the UI from presenting a stale available state during dispatch.
+
 ## Worker heartbeat fields
 
 ```json
@@ -34,7 +74,18 @@ Allowed `state` values are `idle`, `busy`, and `training`.
 
 ## Image upload
 
-The master accepts `multipart/form-data` at `POST /inference/images`. The client must provide an image file and an explicit `execution_mode`. The master stores the file under `uploads/inference/<uuid>.<suffix>` before it writes the inference job to Redis. If no worker can be reserved, the master deletes that newly uploaded object.
+The master accepts `multipart/form-data` at `POST /inference/images`. The client must provide an image file and an explicit `execution_mode`. The master stores the file under `uploads/inference/<uuid>.<suffix>`, builds an `InferenceOrder`, then creates worker jobs. If no worker can be reserved, the master deletes that newly uploaded object.
+
+## Inference order
+
+The UI sends an `InferenceOrder` to `POST /inference/orders` when its image already exists in RustFS. An order states the user intent; it is not yet a worker message. The Master reads `execution_mode` and calls either `load_balance()` or `ensemble_inference()` explicitly.
+
+```json
+{
+  "image_key": "uploads/inference/4dc597d5-2147-459c-a84d-b7159c188071.jpg",
+  "execution_mode": "ensemble"
+}
+```
 
 ## Inference job
 
@@ -81,6 +132,10 @@ The worker writes a short-lived result under `cc:result:<job-id>:<worker-id>`.
 ```
 
 A failed result has `status: "failed"` and an `error` string instead of classification output.
+
+## Pending job recovery
+
+A worker acknowledges a Stream message only after it has written its Redis result. If the worker process stops first, that message stays pending in its Consumer Group. On restart, the worker uses `XAUTOCLAIM` to reclaim one pending message that has been idle for at least `CC_PENDING_JOB_RECLAIM_IDLE_MS`. If the result already exists, it only acknowledges the old message; otherwise it processes the job normally.
 
 ## Worker cache
 

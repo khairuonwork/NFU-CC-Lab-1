@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
-from app.schemas.inference_contract import ExecutionMode, QueueInferenceRequest
+from app.schemas.inference_contract import ExecutionMode, InferenceOrder
 from app.services.job_dispatcher import JobDispatcher, WorkerUnavailableError
 from app.services.job_status import read_inference_job
 from app.services.object_storage import delete_object, upload_inference_image
@@ -29,16 +29,25 @@ def worker_unavailable_response(
         },
     )
 
-# Queue an existing image from RustFS for one explicit execution mode
-@router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
-async def queue_inference_job(
-    body: QueueInferenceRequest,
+# Return worker state and enabled execution modes before the UI queues a job.
+@router.get("/workers")
+async def get_worker_statuses(request: Request) -> JSONResponse:
+    dispatcher = JobDispatcher(request.app.state.redis, get_settings())
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=await dispatcher.read_worker_statuses(),
+    )
+
+# Accept an explicit UI order for an existing image in RustFS.
+@router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
+async def submit_inference_order(
+    body: InferenceOrder,
     request: Request,
 ) -> JSONResponse:
     dispatcher = JobDispatcher(request.app.state.redis, get_settings())
 
     try:
-        job, worker_ids = await dispatcher.dispatch(body)
+        job, worker_ids = await dispatcher.accept_order(body)
     except WorkerUnavailableError as error:
         return worker_unavailable_response(error, body.execution_mode)
 
@@ -94,13 +103,13 @@ async def upload_and_queue_inference(
         await file.close()
 
     dispatcher = JobDispatcher(request.app.state.redis, settings)
-    queue_request = QueueInferenceRequest(
+    order = InferenceOrder(
         image_key=object_key,
         execution_mode=execution_mode,
     )
 
     try:
-        job, worker_ids = await dispatcher.dispatch(queue_request)
+        job, worker_ids = await dispatcher.accept_order(order)
     except WorkerUnavailableError as error:
         await delete_object(rustfs, settings, object_key)
         return worker_unavailable_response(error, execution_mode)

@@ -9,12 +9,12 @@ class ExecutionMode(StrEnum):
     LOAD_BALANCE = "load_balance"
     ENSEMBLE = "ensemble"
 
-# Queue an exist image from RustFS
-class QueueInferenceRequest(BaseModel):
+# Order received from the UI before the Master creates worker jobs.
+class InferenceOrder(BaseModel):
     image_key: str = Field(min_length=1)
     execution_mode: ExecutionMode
 
-# JSON payload from Master to Worker Redis Stream
+# JSON payload from Master to Worker Redis Stream.
 class InferenceJob(BaseModel):
     schema_version: Literal[1] = 1
     job_id: UUID
@@ -23,7 +23,7 @@ class InferenceJob(BaseModel):
     image_key: str
     submitted_at: datetime
 
-# Temporary result from one worker to Redis
+# Temporary result from one worker to Redis.
 class InferenceResult(BaseModel):
     schema_version: Literal[1] = 1
     job_id: UUID
