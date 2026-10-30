@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from cc-waste-model!")
+from cc_waste_model.labels import CLASS_LABELS
+
+__all__ = ["CLASS_LABELS"]
