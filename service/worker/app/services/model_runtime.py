@@ -81,7 +81,7 @@ def _prepare_input(image_path: Path) -> numpy.ndarray:
     ) / numpy.asarray(IMAGE_NET_STANDARD_DEVIATION, dtype=numpy.float32)
     return numpy.transpose(normalized, (2, 0, 1))[numpy.newaxis, ...]
 
-# Convert the three raw ONNX logits into a probability distribution.
+# Convert the raw ONNX logits into a probability distribution.
 def _softmax(logits: numpy.ndarray) -> numpy.ndarray:
     shifted_logits = logits - numpy.max(logits)
     exponentials = numpy.exp(shifted_logits)

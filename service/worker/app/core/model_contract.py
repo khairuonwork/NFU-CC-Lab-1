@@ -7,8 +7,7 @@ MODEL_INPUT_CHANNELS = 3
 # Class index order must stay identical across every ensemble model.
 CLASS_LABELS = (
     "organic",
-    "anorganic",
-    "electronic",
+    "recyclable"
 )
 
 # MobileNetV3-Small uses RGB input normalized with ImageNet statistics.
