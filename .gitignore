@@ -25,3 +25,10 @@ infra/ansible/inventory/lab.yml
 .DS_Store
 .vscode/
 .idea/
+
+# Model dataset and generated artifacts
+model/data/*
+!model/data/.gitkeep
+
+model/artifacts/*
+!model/artifacts/.gitkeep

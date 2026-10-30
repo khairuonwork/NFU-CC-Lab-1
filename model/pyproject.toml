@@ -1,0 +1,24 @@
+[project]
+name = "cc-waste-model"
+version = "0.1.0"
+description = "Waste model used for completing FTIP Internship -  Cloud Computing Lab"
+authors = [
+    { name = "Daffa Khairul", email = "khairulammardaffa@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.4.6",
+    "onnx>=1.23.2",
+    "onnxruntime>=1.31.1",
+    "pillow>=13.0.0",
+    "torch>=2.15.0",
+    "torchvision>=0.29.2",
+    "tqdm>=4.70.1",
+]
+
+[project.scripts]
+cc-waste-model = "cc_waste_model:main"
+
+[build-system]
+requires = ["uv_build>=0.11.17,<0.12.0"]
+build-backend = "uv_build"
