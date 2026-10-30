@@ -1,0 +1,8 @@
+---
+- name: Deploy the Master Controller runtime
+  hosts: master_nodes
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: master_runtime

@@ -1,0 +1,104 @@
+---
+- name: Verify required Worker runtime variables
+  ansible.builtin.assert:
+    that:
+      - worker_runtime_id | length > 0
+      - worker_runtime_model_key | length > 0
+      - worker_runtime_master_host | length > 0
+      - vault_redis_password | length > 0
+      - vault_rustfs_access_key | length > 0
+      - vault_rustfs_secret_key | length > 0
+    fail_msg: >-
+      Worker runtime variables or Vault credentials are incomplete. Define the
+      shared values in group_vars/worker_nodes and credentials in its Vault.
+  no_log: true
+
+- name: Create Worker runtime directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+  loop:
+    - "{{ worker_runtime_release_root }}"
+    - "{{ worker_runtime_runtime_root }}"
+
+- name: Copy Docker build ignore rules
+  ansible.builtin.copy:
+    src: "{{ worker_runtime_source_root }}/.dockerignore"
+    dest: "{{ worker_runtime_release_root }}/.dockerignore"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+
+- name: Create Worker source directory
+  ansible.builtin.file:
+    path: "{{ worker_runtime_release_root }}/service/worker"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy Worker dependency manifests
+  ansible.builtin.copy:
+    src: "{{ worker_runtime_source_root }}/service/worker/{{ item }}"
+    dest: "{{ worker_runtime_release_root }}/service/worker/{{ item }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+  loop:
+    - Dockerfile
+    - pyproject.toml
+    - uv.lock
+
+- name: Copy Worker application source
+  ansible.builtin.copy:
+    src: "{{ worker_runtime_source_root }}/service/worker/app/"
+    dest: "{{ worker_runtime_release_root }}/service/worker/app/"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy Worker Compose source
+  ansible.builtin.copy:
+    src: "{{ worker_runtime_source_root }}/infra/compose/worker/"
+    dest: "{{ worker_runtime_release_root }}/infra/compose/worker/"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Render Worker runtime environment
+  ansible.builtin.template:
+    src: worker.env.j2
+    dest: "{{ worker_runtime_env_file }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  no_log: true
+
+- name: Build and start Worker runtime
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name cc-worker
+      --env-file {{ worker_runtime_env_file }}
+      --file {{ worker_runtime_compose_file }}
+      up --detach --build --remove-orphans
+  register: worker_runtime_compose_up
+  changed_when: >-
+    'Started' in worker_runtime_compose_up.stdout or
+    'Recreated' in worker_runtime_compose_up.stdout or
+    'Built' in worker_runtime_compose_up.stdout or
+    'Started' in worker_runtime_compose_up.stderr or
+    'Recreated' in worker_runtime_compose_up.stderr or
+    'Built' in worker_runtime_compose_up.stderr
+  when: not ansible_check_mode
+
+- name: Show Worker runtime result
+  ansible.builtin.debug:
+    msg:
+      worker_id: "{{ worker_runtime_id }}"
+      model_key: "{{ worker_runtime_model_key }}"
+      compose_output: "{{ worker_runtime_compose_up.stdout_lines }}"
+  when: not ansible_check_mode
