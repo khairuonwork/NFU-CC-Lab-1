@@ -31,10 +31,30 @@
     group: "{{ ansible_user }}"
     mode: "0644"
 
-- name: Copy Master Controller source
+- name: Create Master Controller source directory
+  ansible.builtin.file:
+    path: "{{ master_runtime_release_root }}/service/master"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy Master Controller dependency manifests
   ansible.builtin.copy:
-    src: "{{ master_runtime_source_root }}/service/master/"
-    dest: "{{ master_runtime_release_root }}/service/master/"
+    src: "{{ master_runtime_source_root }}/service/master/{{ item }}"
+    dest: "{{ master_runtime_release_root }}/service/master/{{ item }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+  loop:
+    - Dockerfile
+    - pyproject.toml
+    - uv.lock
+
+- name: Copy Master Controller application source
+  ansible.builtin.copy:
+    src: "{{ master_runtime_source_root }}/service/master/app/"
+    dest: "{{ master_runtime_release_root }}/service/master/app/"
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0755"

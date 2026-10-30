@@ -32,10 +32,30 @@
     group: "{{ ansible_user }}"
     mode: "0644"
 
-- name: Copy Worker source
+- name: Create Worker source directory
+  ansible.builtin.file:
+    path: "{{ worker_runtime_release_root }}/service/worker"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy Worker dependency manifests
   ansible.builtin.copy:
-    src: "{{ worker_runtime_source_root }}/service/worker/"
-    dest: "{{ worker_runtime_release_root }}/service/worker/"
+    src: "{{ worker_runtime_source_root }}/service/worker/{{ item }}"
+    dest: "{{ worker_runtime_release_root }}/service/worker/{{ item }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+  loop:
+    - Dockerfile
+    - pyproject.toml
+    - uv.lock
+
+- name: Copy Worker application source
+  ansible.builtin.copy:
+    src: "{{ worker_runtime_source_root }}/service/worker/app/"
+    dest: "{{ worker_runtime_release_root }}/service/worker/app/"
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0755"
