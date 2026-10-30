@@ -1,0 +1,11 @@
+---
+# Keep a deployable source tree because Compose builds from the repository root.
+worker_runtime_deploy_root: /opt/cc-lab
+worker_runtime_release_root: "{{ worker_runtime_deploy_root }}/releases/worker"
+worker_runtime_runtime_root: "{{ worker_runtime_deploy_root }}/runtime/worker"
+worker_runtime_compose_file: >-
+  {{ worker_runtime_release_root }}/infra/compose/worker/compose.yml
+worker_runtime_env_file: "{{ worker_runtime_runtime_root }}/worker.env"
+
+# This resolves to the CC repository on the Ansible control node.
+worker_runtime_source_root: "{{ role_path }}/../../../.."
