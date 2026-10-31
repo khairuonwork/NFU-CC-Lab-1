@@ -63,6 +63,7 @@ def export_checkpoint_to_onnx(
     input_names=["image"],
     output_names=["logits"],
     opset_version=18,
+    external_data=False,
 )
 
     onnx_model = onnx.load(str(output_path))

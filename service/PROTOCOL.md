@@ -122,10 +122,9 @@ The worker writes a short-lived result under `cc:result:<job-id>:<worker-id>`.
   "label": "organic",
   "probabilities": {
     "organic": 0.94,
-    "anorganic": 0.05,
-    "electronic": 0.01
+    "recyclable": 0.06
   },
-  "model_key": "models/model-a/current.onnx",
+  "model_key": "models/baseline-mobilenetv3-small.onnx",
   "elapsed_ms": 83,
   "completed_at": "2026-10-28T10:00:01Z"
 }
@@ -139,7 +138,9 @@ A worker acknowledges a Stream message only after it has written its Redis resul
 
 ## Model contract
 
-Every worker runs a MobileNetV3-Small ONNX model with the same versioned contract. Worker model files are separate objects, for example `models/node1/current.onnx` and `models/node2/current.onnx`, but their input and output rules must match.
+Every worker runs a MobileNetV3-Small ONNX model with the same versioned contract. Both workers currently use the same RustFS model object: `models/baseline-mobilenetv3-small.onnx`.
+Each Worker VM downloads and caches its own local copy, while RustFS remains
+the source of truth.
 
 | Field | Value |
 | --- | --- |
@@ -149,9 +150,8 @@ Every worker runs a MobileNetV3-Small ONNX model with the same versioned contrac
 | Mean | `(0.485, 0.456, 0.406)` |
 | Standard deviation | `(0.229, 0.224, 0.225)` |
 | Class `0` | `organic` |
-| Class `1` | `anorganic` |
-| Class `2` | `electronic` |
-| Model output | Raw logits with shape `1 × 3` |
+| Class `1` | `recyclable` |
+| Model output | Raw logits with shape `1 × 2` |
 
 The training and ONNX export pipeline must preserve this exact class order. Ensemble averaging is valid only when both workers use compatible label indexes and preprocessing.
 

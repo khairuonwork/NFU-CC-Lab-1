@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     rustfs_endpoint_url: str = "http://localhost:9000"
     rustfs_access_key: str = ""
     rustfs_secret_key: str = ""
-    rustfs_region: str = "ap-east-1"
+    rustfs_region: str = "tw-taipei-1"
     rustfs_bucket: str = "cc-lab"
 
     @property

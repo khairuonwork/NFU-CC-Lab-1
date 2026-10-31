@@ -1,0 +1,8 @@
+---
+- name: Publish the baseline ONNX artifact to RustFS
+  hosts: master_nodes
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: model_artifact

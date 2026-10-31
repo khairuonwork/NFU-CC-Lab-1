@@ -16,10 +16,10 @@ class Settings(BaseSettings):
     rustfs_endpoint_url: str = "http://localhost:9000"
     rustfs_access_key: str = ""
     rustfs_secret_key: str = ""
-    rustfs_region: str = "ap-east-1"
+    rustfs_region: str = "tw-taipei-1"
     rustfs_bucket: str = "cc-lab"
     worker_cache_dir: Path = Path("/tmp/cc-worker-cache")
-    model_key: str = "models/node1/current.onnx"
+    model_key: str = "models/baseline-mobilenetv3-small.onnx"
     model_cache_dir: Path = Path("/tmp/cc-worker-model-cache")
 
     model_config = SettingsConfigDict(

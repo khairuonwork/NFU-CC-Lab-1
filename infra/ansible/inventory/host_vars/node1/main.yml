@@ -1,4 +1,4 @@
 ---
 # Node-specific Worker identity and assigned model artifact.
 worker_runtime_id: node1
-worker_runtime_model_key: models/node1/current.onnx
+worker_runtime_model_key: models/baseline-mobilenetv3-small.onnx
