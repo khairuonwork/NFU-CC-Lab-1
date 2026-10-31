@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 
 import {
-  masterApiUrl,
+  fetchMaster,
   masterUnavailableResponse,
   proxyMasterResponse,
 } from '#lib/server/master-api';
@@ -9,7 +9,7 @@ import {
 export const POST: RequestHandler = async ({ request }) => {
   try {
     const formData = await request.formData();
-    const response = await fetch(masterApiUrl('/inference/images'), {
+    const response = await fetchMaster('/inference/images', {
       method: 'POST',
       body: formData,
       headers: {

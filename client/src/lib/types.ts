@@ -1,6 +1,6 @@
 export type ExecutionMode = 'load_balance' | 'ensemble';
 
-export type WorkerState = 'idle' | 'busy' | 'offline' | 'reserved';
+export type WorkerState = 'idle' | 'busy' | 'offline' | 'reserved' | 'training';
 
 export interface WorkerStatus {
   worker_id: string;

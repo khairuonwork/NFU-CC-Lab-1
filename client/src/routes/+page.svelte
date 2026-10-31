@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  import DistributedFlow from '../lib/components/distributed-flow.svelte';
+
   import type {
     ApiError,
     ExecutionMode,
@@ -19,11 +21,13 @@
   let workerLoading = $state(true);
   let selectedMode = $state<ExecutionMode>('load_balance');
   let selectedFile = $state<File | null>(null);
+  let fileInput = $state<HTMLInputElement | null>(null);
   let queuedInference = $state<QueuedInference | null>(null);
   let currentJob = $state<InferenceJob | null>(null);
   let submissionState = $state<SubmissionState>('idle');
   let submissionError = $state('');
   let pollRevision = 0;
+  let heartbeatRevision = $state(0);
 
   let selectedModeAvailability = $derived(workerSnapshot?.execution_modes[selectedMode] ?? null);
   let canSubmit = $derived(
@@ -65,6 +69,7 @@
 
       workerSnapshot = snapshot;
       workerError = '';
+      heartbeatRevision += 1;
       ensureSelectedModeIsAvailable(snapshot);
     } catch (error) {
       workerError = errorMessage(error);
@@ -87,6 +92,21 @@
     const input = event.currentTarget as HTMLInputElement;
     selectedFile = input.files?.[0] ?? null;
     submissionError = '';
+  }
+
+  function clearJobResult(): void {
+    pollRevision += 1;
+    selectedFile = null;
+    queuedInference = null;
+    currentJob = null;
+    submissionState = 'idle';
+    submissionError = '';
+
+    if (fileInput) {
+      fileInput.value = '';
+    }
+
+    void refreshWorkers();
   }
 
   async function submitInference(): Promise<void> {
@@ -336,6 +356,7 @@
         id="image-file"
         type="file"
         accept="image/jpeg,image/png,image/webp"
+        bind:this={fileInput}
         onchange={handleFileChange}
       />
       <p class="muted file-name" aria-live="polite">
@@ -363,15 +384,30 @@
     </section>
   </div>
 
+  <DistributedFlow
+    snapshot={workerSnapshot}
+    {queuedInference}
+    {currentJob}
+    {submissionState}
+    {heartbeatRevision}
+  />
+
   <section class="panel result-panel" aria-labelledby="result-heading">
     <div class="section-heading">
       <div>
         <p class="eyebrow">Job result</p>
         <h2 id="result-heading">Inference status</h2>
       </div>
-      {#if submissionState !== 'idle'}
-        <span class="state-pill {submissionState}">{formatWorkerState(submissionState)}</span>
-      {/if}
+      <div class="result-actions">
+        {#if queuedInference || submissionError}
+          <button class="secondary-button clear-button" type="button" onclick={clearJobResult}>
+            Clear result
+          </button>
+        {/if}
+        {#if submissionState !== 'idle'}
+          <span class="state-pill {submissionState}">{formatWorkerState(submissionState)}</span>
+        {/if}
+      </div>
     </div>
 
     {#if submissionError}
@@ -460,7 +496,8 @@
   .page-header,
   .section-heading,
   .worker-row,
-  .probability-heading {
+  .probability-heading,
+  .result-actions {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -695,6 +732,16 @@
     min-height: 15rem;
   }
 
+  .result-actions {
+    justify-content: end;
+  }
+
+  .clear-button {
+    min-height: auto;
+    padding: 0.42rem 0.65rem;
+    font-size: 0.82rem;
+  }
+
   .job-meta {
     display: grid;
     gap: 0.4rem;
@@ -767,7 +814,8 @@
     }
 
     .page-header,
-    .section-heading {
+    .section-heading,
+    .result-actions {
       align-items: flex-start;
       flex-direction: column;
     }

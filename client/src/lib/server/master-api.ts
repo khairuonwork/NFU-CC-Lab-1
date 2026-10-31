@@ -1,8 +1,22 @@
 import { MASTER_API_BASE_URL } from '$app/env/private';
 
 export function masterApiUrl(path: string): string {
+  if (!MASTER_API_BASE_URL) {
+    throw new Error('MASTER_API_BASE_URL is not configured for the SvelteKit server.');
+  }
+
   const baseUrl = MASTER_API_BASE_URL.replace(/\/$/, '');
   return `${baseUrl}${path}`;
+}
+
+export async function fetchMaster(path: string, init: RequestInit): Promise<Response> {
+  try {
+    const url = masterApiUrl(path);
+    return await fetch(url, init);
+  } catch (error) {
+    console.error(`Master API proxy request failed for path: ${path}`, error);
+    throw error;
+  }
 }
 
 export async function proxyMasterResponse(response: Response): Promise<Response> {

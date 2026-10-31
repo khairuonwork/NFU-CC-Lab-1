@@ -1,14 +1,14 @@
 import type { RequestHandler } from './$types';
 
 import {
-  masterApiUrl,
+  fetchMaster,
   masterUnavailableResponse,
   proxyMasterResponse,
 } from '#lib/server/master-api';
 
 export const GET: RequestHandler = async () => {
   try {
-    const response = await fetch(masterApiUrl('/inference/workers'), {
+    const response = await fetchMaster('/inference/workers', {
       headers: {
         accept: 'application/json',
       },
