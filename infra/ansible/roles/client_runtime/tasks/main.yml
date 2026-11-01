@@ -1,0 +1,106 @@
+---
+- name: Verify required Client runtime variables
+  ansible.builtin.assert:
+    that:
+      - client_runtime_bind_address | length > 0
+      - client_runtime_port | int > 0
+      - client_runtime_origin | length > 0
+      - client_runtime_master_api_base_url | length > 0
+    fail_msg: >-
+      Client runtime configuration is incomplete. Define it in
+      inventory/host_vars/physical_host/main.yml.
+
+- name: Create Client runtime directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+  loop:
+    - "{{ client_runtime_release_root }}"
+    - "{{ client_runtime_runtime_root }}"
+    - "{{ client_runtime_release_root }}/client"
+    - "{{ client_runtime_release_root }}/infra/compose/client"
+
+- name: Copy Docker build ignore rules
+  ansible.builtin.copy:
+    src: "{{ client_runtime_source_root }}/.dockerignore"
+    dest: "{{ client_runtime_release_root }}/.dockerignore"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+
+- name: Copy Client dependency manifests
+  ansible.builtin.copy:
+    src: "{{ client_runtime_source_root }}/client/{{ item }}"
+    dest: "{{ client_runtime_release_root }}/client/{{ item }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+  loop:
+    - package.json
+    - package-lock.json
+    - tsconfig.json
+    - vite.config.ts
+    - Dockerfile
+
+- name: Copy Client application source
+  ansible.builtin.copy:
+    src: "{{ client_runtime_source_root }}/client/src/"
+    dest: "{{ client_runtime_release_root }}/client/src/"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy Client Compose source
+  ansible.builtin.copy:
+    src: "{{ client_runtime_source_root }}/infra/compose/client/"
+    dest: "{{ client_runtime_release_root }}/infra/compose/client/"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Render Client runtime environment
+  ansible.builtin.template:
+    src: client.env.j2
+    dest: "{{ client_runtime_env_file }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+
+- name: Build and start Client runtime
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name cc-client
+      --env-file {{ client_runtime_env_file }}
+      --file {{ client_runtime_compose_file }}
+      up --detach --build --remove-orphans
+  register: client_runtime_compose_up
+  changed_when: >-
+    'Started' in client_runtime_compose_up.stdout or
+    'Recreated' in client_runtime_compose_up.stdout or
+    'Built' in client_runtime_compose_up.stdout or
+    'Started' in client_runtime_compose_up.stderr or
+    'Recreated' in client_runtime_compose_up.stderr or
+    'Built' in client_runtime_compose_up.stderr
+  when: not ansible_check_mode
+
+- name: Wait for Client readiness
+  ansible.builtin.uri:
+    url: >-
+      http://{{ client_runtime_bind_address }}:{{ client_runtime_port }}/health
+    method: GET
+    status_code: 200
+    return_content: true
+  register: client_runtime_readiness
+  retries: 18
+  delay: 5
+  until: client_runtime_readiness.status == 200
+  when: not ansible_check_mode
+
+- name: Show Client readiness result
+  ansible.builtin.debug:
+    msg: "{{ client_runtime_readiness.json }}"
+  when: not ansible_check_mode

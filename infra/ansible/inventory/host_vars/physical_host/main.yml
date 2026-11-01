@@ -1,0 +1,9 @@
+---
+# The Client is reachable only through the Physical Host's Tailnet address.
+client_runtime_bind_address: 100.94.204.62
+client_runtime_port: 3001
+client_runtime_origin: >-
+  http://{{ client_runtime_bind_address }}:{{ client_runtime_port }}
+
+# The Client server proxies browser requests to the Master API.
+client_runtime_master_api_base_url: http://192.168.4.168:8000
