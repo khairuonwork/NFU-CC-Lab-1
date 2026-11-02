@@ -1,0 +1,8 @@
+---
+- name: Deploy the Worker runtime
+  hosts: worker_nodes
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: worker_runtime

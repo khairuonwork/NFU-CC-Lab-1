@@ -1,0 +1,23 @@
+---
+# The source artifact exists only on the Ansible control node.
+model_artifact_source_root: "{{ role_path }}/../../../.."
+model_artifact_filename: baseline-mobilenetv3-small.onnx
+model_artifact_source_directory: >-
+  {{ model_artifact_source_root }}/model/artifacts/onnx
+model_artifact_source_file: >-
+  {{ model_artifact_source_directory }}/{{
+  model_artifact_filename }}
+
+# NodeMaster receives a temporary copy before uploading it to RustFS.
+model_artifact_remote_directory: /opt/cc-lab/artifacts
+model_artifact_remote_file: >-
+  {{ model_artifact_remote_directory }}/{{
+  model_artifact_filename }}
+
+# RustFS is reached through NodeMaster's published local port.
+model_artifact_endpoint_url: http://127.0.0.1:9000
+model_artifact_bucket: "{{ master_runtime_rustfs_bucket }}"
+model_artifact_object_key: models/baseline-mobilenetv3-small.onnx
+
+# AWS CLI communicates with RustFS through its S3-compatible API.
+model_artifact_aws_cli_image: public.ecr.aws/aws-cli/aws-cli:latest

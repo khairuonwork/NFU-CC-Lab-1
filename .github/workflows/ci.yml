@@ -1,0 +1,241 @@
+---
+name: Continuous Integration
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    name: Client
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Run Svelte checks
+        run: npm run lint
+
+      - name: Build Client
+        run: npm run build
+
+  master:
+    name: Master Service
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: service/master
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: true
+          cache-dependency-glob: service/master/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Compile Master source
+        run: uv run python -m compileall app
+
+  worker:
+    name: Worker Service
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: service/worker
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: true
+          cache-dependency-glob: service/worker/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Compile Worker source
+        run: uv run python -m compileall app
+
+  model:
+    name: Model
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: model
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: true
+          cache-dependency-glob: model/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Compile model source
+        run: uv run python -m compileall src scripts
+
+  infrastructure:
+    name: Infrastructure
+    runs-on: ubuntu-latest
+
+    env:
+      ANSIBLE_INVENTORY: ${{ github.workspace }}/.github/ansible/inventory.yml
+
+    defaults:
+      run:
+        working-directory: infra/ansible
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Create CI-only Ansible Vault password
+        run: |
+          umask 077
+          vault_password_file="$RUNNER_TEMP/ansible-ci-vault-pass"
+          printf '%s\n' 'ci-only-placeholder' > "$vault_password_file"
+          printf '%s\n' \
+            "ANSIBLE_VAULT_PASSWORD_FILE=$vault_password_file" \
+            >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: true
+          cache-dependency-glob: infra/ansible/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Run Ansible lint
+        run: uv run ansible-lint playbooks roles
+
+      - name: Run YAML lint
+        run: >-
+          uv run yamllint
+          requirements.yml
+          inventory/lab.yml.example
+          inventory/group_vars
+          inventory/host_vars
+          playbooks
+          roles
+
+      - name: Run Ansible syntax checks
+        run: >-
+          uv run ansible-playbook
+          --syntax-check
+          playbooks/*.yml
+
+  deploy:
+    name: Deploy lab
+    needs: [client, master, worker, model, infrastructure]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, cc-lab]
+
+    concurrency:
+      group: cc-lab-deployment
+      cancel-in-progress: false
+
+    env:
+      ANSIBLE_VAULT_PASSWORD_FILE: /home/khairuonlab/.cc-lab/vault-pass
+      CC_LAB_INVENTORY_FILE: /home/khairuonlab/.cc-lab/lab.yml
+
+    defaults:
+      run:
+        working-directory: infra/ansible
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Verify runner deployment material
+        run: |
+          test -r "$ANSIBLE_VAULT_PASSWORD_FILE"
+          test -r "$CC_LAB_INVENTORY_FILE"
+
+      - name: Stage local deployment inventory
+        run: install -m 0600 "$CC_LAB_INVENTORY_FILE" inventory/lab.yml
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: true
+          cache-dependency-glob: infra/ansible/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Deploy Master runtime
+        run: uv run ansible-playbook playbooks/deploy-master-runtime.yml
+
+      - name: Deploy Worker runtimes
+        run: uv run ansible-playbook playbooks/deploy-worker-runtime.yml
+
+      - name: Deploy Client runtime
+        run: uv run ansible-playbook playbooks/deploy-client-runtime.yml

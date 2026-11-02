@@ -1,0 +1,8 @@
+---
+- name: Deploy the Svelte Client runtime
+  hosts: cloudstack_hosts
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: client_runtime

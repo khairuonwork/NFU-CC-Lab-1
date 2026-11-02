@@ -1,0 +1,112 @@
+---
+- name: Verify required Master runtime variables
+  ansible.builtin.assert:
+    that:
+      - master_runtime_name | length > 0
+      - master_runtime_worker_ids | length > 0
+      - vault_redis_password | length > 0
+      - vault_rustfs_access_key | length > 0
+      - vault_rustfs_secret_key | length > 0
+    fail_msg: >-
+      Master runtime variables or Vault credentials are incomplete. Define the
+      non-secret values in group_vars/master_nodes and credentials in its Vault.
+  no_log: true
+
+- name: Create Master runtime directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+  loop:
+    - "{{ master_runtime_release_root }}"
+    - "{{ master_runtime_runtime_root }}"
+
+- name: Copy Docker build ignore rules
+  ansible.builtin.copy:
+    src: "{{ master_runtime_source_root }}/.dockerignore"
+    dest: "{{ master_runtime_release_root }}/.dockerignore"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+
+- name: Create Master Controller source directory
+  ansible.builtin.file:
+    path: "{{ master_runtime_release_root }}/service/master"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy Master Controller dependency manifests
+  ansible.builtin.copy:
+    src: "{{ master_runtime_source_root }}/service/master/{{ item }}"
+    dest: "{{ master_runtime_release_root }}/service/master/{{ item }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+  loop:
+    - Dockerfile
+    - pyproject.toml
+    - uv.lock
+
+- name: Copy Master Controller application source
+  ansible.builtin.copy:
+    src: "{{ master_runtime_source_root }}/service/master/app/"
+    dest: "{{ master_runtime_release_root }}/service/master/app/"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy Master Compose source
+  ansible.builtin.copy:
+    src: "{{ master_runtime_source_root }}/infra/compose/master/"
+    dest: "{{ master_runtime_release_root }}/infra/compose/master/"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Render Master runtime environment
+  ansible.builtin.template:
+    src: master.env.j2
+    dest: "{{ master_runtime_env_file }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  no_log: true
+
+- name: Build and start Master runtime
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name cc-master
+      --env-file {{ master_runtime_env_file }}
+      --file {{ master_runtime_compose_file }}
+      up --detach --build --remove-orphans
+  register: master_runtime_compose_up
+  changed_when: >-
+    'Started' in master_runtime_compose_up.stdout or
+    'Recreated' in master_runtime_compose_up.stdout or
+    'Built' in master_runtime_compose_up.stdout or
+    'Started' in master_runtime_compose_up.stderr or
+    'Recreated' in master_runtime_compose_up.stderr or
+    'Built' in master_runtime_compose_up.stderr
+  when: not ansible_check_mode
+
+- name: Wait for Master readiness
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8000/health/ready
+    method: GET
+    status_code: 200
+    return_content: true
+  register: master_runtime_readiness
+  retries: 18
+  delay: 5
+  until: master_runtime_readiness.status == 200
+  when: not ansible_check_mode
+
+- name: Show Master readiness result
+  ansible.builtin.debug:
+    msg: "{{ master_runtime_readiness.json }}"
+  when: not ansible_check_mode

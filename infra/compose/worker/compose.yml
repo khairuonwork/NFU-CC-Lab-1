@@ -1,0 +1,38 @@
+name: cc-worker
+
+services:
+  worker:
+    build:
+      context: ../../..
+      dockerfile: service/worker/Dockerfile
+    image: cc/worker:0.1.0
+    restart: unless-stopped
+    environment:
+      CC_WORKER_ID: ${CC_WORKER_ID}
+
+      CC_REDIS_URL: ${CC_REDIS_URL}
+      CC_HEARTBEAT_TTL_SECONDS: ${CC_HEARTBEAT_TTL_SECONDS}
+      CC_HEARTBEAT_INTERVAL_SECONDS: ${CC_HEARTBEAT_INTERVAL_SECONDS}
+      CC_CONSUMER_GROUP_NAME: ${CC_CONSUMER_GROUP_NAME}
+      CC_STREAM_BLOCK_MS: ${CC_STREAM_BLOCK_MS}
+      CC_PENDING_JOB_RECLAIM_IDLE_MS: ${CC_PENDING_JOB_RECLAIM_IDLE_MS}
+      CC_RESULT_TTL_SECONDS: ${CC_RESULT_TTL_SECONDS}
+
+      CC_RUSTFS_ENDPOINT_URL: ${CC_RUSTFS_ENDPOINT_URL}
+      CC_RUSTFS_ACCESS_KEY: ${CC_RUSTFS_ACCESS_KEY}
+      CC_RUSTFS_SECRET_KEY: ${CC_RUSTFS_SECRET_KEY}
+      CC_RUSTFS_REGION: ${CC_RUSTFS_REGION}
+      CC_RUSTFS_BUCKET: ${CC_RUSTFS_BUCKET}
+
+      CC_WORKER_CACHE_DIR: /var/lib/cc-worker/cache
+      CC_MODEL_KEY: ${CC_MODEL_KEY}
+      CC_MODEL_CACHE_DIR: /var/lib/cc-worker/models
+    volumes:
+      - worker_cache:/var/lib/cc-worker/cache
+      - worker_models:/var/lib/cc-worker/models
+
+volumes:
+  worker_cache:
+    name: cc_worker_cache
+  worker_models:
+    name: cc_worker_models

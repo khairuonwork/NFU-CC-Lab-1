@@ -1,0 +1,115 @@
+---
+- name: Verify local ONNX artifact exists
+  ansible.builtin.stat:
+    path: "{{ model_artifact_source_file }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: model_artifact_local_file
+
+- name: Assert local ONNX artifact is ready
+  ansible.builtin.assert:
+    that:
+      - model_artifact_local_file.stat.exists
+      - model_artifact_local_file.stat.isreg
+      - model_artifact_local_file.stat.size | int > 0
+    fail_msg: >-
+      Build the ONNX artifact first at:
+      {{ model_artifact_source_file }}
+
+- name: Verify RustFS credentials are available
+  ansible.builtin.assert:
+    that:
+      - vault_rustfs_access_key | length > 0
+      - vault_rustfs_secret_key | length > 0
+    fail_msg: RustFS credentials are missing from the Master Node Vault.
+  no_log: true
+
+- name: Create temporary artifact directory on NodeMaster
+  ansible.builtin.file:
+    path: "{{ model_artifact_remote_directory }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy ONNX artifact to NodeMaster
+  ansible.builtin.copy:
+    src: "{{ model_artifact_source_file }}"
+    dest: "{{ model_artifact_remote_file }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"
+
+- name: Upload ONNX artifact to RustFS
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network
+      - host
+      - --volume
+      - "{{ model_artifact_remote_directory }}:/artifacts:ro"
+      - --env
+      - AWS_ACCESS_KEY_ID
+      - --env
+      - AWS_SECRET_ACCESS_KEY
+      - --env
+      - AWS_DEFAULT_REGION
+      - "{{ model_artifact_aws_cli_image }}"
+      - --endpoint-url
+      - "{{ model_artifact_endpoint_url }}"
+      - --only-show-errors
+      - s3
+      - cp
+      - "/artifacts/{{ model_artifact_remote_file | basename }}"
+      - "s3://{{ model_artifact_bucket }}/{{ model_artifact_object_key }}"
+      - --no-progress
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_rustfs_access_key }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_rustfs_secret_key }}"
+    AWS_DEFAULT_REGION: "{{ master_runtime_rustfs_region }}"
+  changed_when: true
+  no_log: true
+
+- name: Verify ONNX artifact exists in RustFS
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network
+      - host
+      - --env
+      - AWS_ACCESS_KEY_ID
+      - --env
+      - AWS_SECRET_ACCESS_KEY
+      - --env
+      - AWS_DEFAULT_REGION
+      - "{{ model_artifact_aws_cli_image }}"
+      - --endpoint-url
+      - "{{ model_artifact_endpoint_url }}"
+      - s3api
+      - head-object
+      - --bucket
+      - "{{ model_artifact_bucket }}"
+      - --key
+      - "{{ model_artifact_object_key }}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_rustfs_access_key }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_rustfs_secret_key }}"
+    AWS_DEFAULT_REGION: "{{ master_runtime_rustfs_region }}"
+  changed_when: false
+  no_log: true
+
+- name: Remove temporary ONNX artifact from NodeMaster
+  ansible.builtin.file:
+    path: "{{ model_artifact_remote_file }}"
+    state: absent
+
+- name: Show published model artifact
+  ansible.builtin.debug:
+    msg:
+      bucket: "{{ model_artifact_bucket }}"
+      object_key: "{{ model_artifact_object_key }}"

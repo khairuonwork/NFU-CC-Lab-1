@@ -1,0 +1,16 @@
+---
+extends: default
+
+# Ansible Vault files start with an encryption header, not a YAML document.
+ignore: |
+  inventory/**/vault.yml
+
+rules:
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true

@@ -1,0 +1,100 @@
+name: cc-master
+
+services:
+  controller:
+    build:
+      context: ../../..
+      dockerfile: service/master/Dockerfile
+    image: cc/master:0.1.0
+    restart: unless-stopped
+    environment:
+      CC_MASTER_NAME: ${CC_MASTER_NAME}
+      CC_MASTER_HOST: 0.0.0.0
+      CC_MASTER_PORT: "8000"
+
+      CC_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CC_WORKER_IDS_CSV: ${CC_WORKER_IDS_CSV}
+      CC_WORKER_RESERVATION_TTL_SECONDS: ${CC_WORKER_RESERVATION_TTL_SECONDS}
+      CC_JOB_TTL_SECONDS: ${CC_JOB_TTL_SECONDS}
+
+      CC_RUSTFS_ENDPOINT_URL: http://rustfs:9000
+      CC_RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      CC_RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      CC_RUSTFS_REGION: ${RUSTFS_REGION}
+      CC_RUSTFS_BUCKET: ${RUSTFS_BUCKET}
+    ports:
+      - "8000:8000"
+    networks:
+      - master_internal
+    depends_on:
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+
+  redis:
+    image: redis:8.10.2-alpine3.23
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - master_internal
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  rustfs:
+    image: rustfs/rustfs:1.0.3
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_REGION: ${RUSTFS_REGION}
+      RUSTFS_ADDRESS: :9000
+      RUSTFS_CONSOLE_ADDRESS: :9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_OBS_LOGGER_LEVEL: error
+    command:
+      - /data
+    ports:
+      - "9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - rustfs_data:/data
+    networks:
+      - master_internal
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent http://127.0.0.1:9000/health
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  redis_data:
+    name: cc_master_redis_data
+
+  rustfs_data:
+    name: cc_master_rustfs_data
+
+networks:
+  master_internal:
+    name: cc_master_internal
+    driver: bridge

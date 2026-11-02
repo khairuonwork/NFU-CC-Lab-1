@@ -1,0 +1,16 @@
+---
+# Master Controller runtime identity
+master_runtime_name: cc-master
+
+# Worker IDs accepted by the Master Controller
+master_runtime_worker_ids:
+  - node1
+  - node2
+
+# Master Controller temporary Redis state
+master_runtime_worker_reservation_ttl_seconds: 30
+master_runtime_job_ttl_seconds: 300
+
+# RustFS stores all source images and model artifacts.
+master_runtime_rustfs_region: tw-taipei-1
+master_runtime_rustfs_bucket: cc-lab

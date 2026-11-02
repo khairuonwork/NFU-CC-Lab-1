@@ -1,0 +1,26 @@
+name: cc-client
+
+services:
+  client:
+    build:
+      context: ../../..
+      dockerfile: client/Dockerfile
+      args:
+        CLIENT_ORIGIN: ${CLIENT_ORIGIN}
+    image: cc/client:0.1.0
+    restart: unless-stopped
+    environment:
+      MASTER_API_BASE_URL: ${MASTER_API_BASE_URL}
+      ORIGIN: ${CLIENT_ORIGIN}
+      HOST: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "${CLIENT_BIND_ADDRESS}:${CLIENT_PORT}:3000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
