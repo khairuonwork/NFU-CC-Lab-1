@@ -1,0 +1,13 @@
+---
+# Keep the Client source and Compose definition on the Physical Host.
+client_runtime_deploy_root: /opt/cc-lab
+client_runtime_release_root: "{{ client_runtime_deploy_root }}/releases/client"
+client_runtime_runtime_root: "{{ client_runtime_deploy_root }}/runtime/client"
+
+client_runtime_compose_file: >-
+  {{ client_runtime_release_root }}/infra/compose/client/compose.yml
+
+client_runtime_env_file: "{{ client_runtime_runtime_root }}/client.env"
+
+# This resolves to the CC repository on the Ansible control node.
+client_runtime_source_root: "{{ role_path }}/../../../.."

@@ -4,6 +4,7 @@ node_modules/
 dist/
 .build/
 .svelte-kit/
+client/build/
 
 # Python
 .venv/
