@@ -132,6 +132,10 @@ jobs:
     name: Infrastructure
     runs-on: ubuntu-latest
 
+    env:
+      ANSIBLE_INVENTORY: ${{ github.workspace }}/.github/ansible/inventory.yml
+      ANSIBLE_VAULT_PASSWORD_FILE: ${{ runner.temp }}/ansible-ci-vault-pass
+
     defaults:
       run:
         working-directory: infra/ansible
@@ -139,6 +143,12 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+
+      - name: Create CI-only Ansible Vault password
+        run: |
+          umask 077
+          printf '%s\n' 'ci-only-placeholder' \
+            > "$RUNNER_TEMP/ansible-ci-vault-pass"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -170,6 +180,5 @@ jobs:
       - name: Run Ansible syntax checks
         run: >-
           uv run ansible-playbook
-          -i ../../.github/ansible/inventory.yml
           --syntax-check
           playbooks/*.yml
