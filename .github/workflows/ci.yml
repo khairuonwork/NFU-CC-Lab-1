@@ -59,7 +59,7 @@ jobs:
           python-version: "3.11"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           enable-cache: true
           cache-dependency-glob: service/master/uv.lock
@@ -88,7 +88,7 @@ jobs:
           python-version: "3.11"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           enable-cache: true
           cache-dependency-glob: service/worker/uv.lock
@@ -117,7 +117,7 @@ jobs:
           python-version: "3.11"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           enable-cache: true
           cache-dependency-glob: model/uv.lock
@@ -148,7 +148,9 @@ jobs:
           umask 077
           vault_password_file="$RUNNER_TEMP/ansible-ci-vault-pass"
           printf '%s\n' 'ci-only-placeholder' > "$vault_password_file"
-          echo "ANSIBLE_VAULT_PASSWORD_FILE=$vault_password_file" >> "$GITHUB_ENV"
+          printf '%s\n' \
+            "ANSIBLE_VAULT_PASSWORD_FILE=$vault_password_file" \
+            >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -156,7 +158,7 @@ jobs:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           enable-cache: true
           cache-dependency-glob: infra/ansible/uv.lock
@@ -182,3 +184,58 @@ jobs:
           uv run ansible-playbook
           --syntax-check
           playbooks/*.yml
+
+  deploy:
+    name: Deploy lab
+    needs: [client, master, worker, model, infrastructure]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, cc-lab]
+
+    concurrency:
+      group: cc-lab-deployment
+      cancel-in-progress: false
+
+    env:
+      ANSIBLE_VAULT_PASSWORD_FILE: /home/khairuonlab/.cc-lab/vault-pass
+      CC_LAB_INVENTORY_FILE: /home/khairuonlab/.cc-lab/lab.yml
+
+    defaults:
+      run:
+        working-directory: infra/ansible
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Verify runner deployment material
+        run: |
+          test -r "$ANSIBLE_VAULT_PASSWORD_FILE"
+          test -r "$CC_LAB_INVENTORY_FILE"
+
+      - name: Stage local deployment inventory
+        run: install -m 0600 "$CC_LAB_INVENTORY_FILE" inventory/lab.yml
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          enable-cache: true
+          cache-dependency-glob: infra/ansible/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Deploy Master runtime
+        run: uv run ansible-playbook playbooks/deploy-master-runtime.yml
+
+      - name: Deploy Worker runtimes
+        run: uv run ansible-playbook playbooks/deploy-worker-runtime.yml
+
+      - name: Deploy Client runtime
+        run: uv run ansible-playbook playbooks/deploy-client-runtime.yml
