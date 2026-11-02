@@ -1,0 +1,22 @@
+---
+all:
+  children:
+    cloudstack_hosts:
+      hosts:
+        physical_host:
+          ansible_connection: local
+
+    guest_nodes:
+      children:
+        master_nodes:
+          hosts:
+            nodemaster:
+              ansible_connection: local
+
+        worker_nodes:
+          hosts:
+            node1:
+              ansible_connection: local
+
+            node2:
+              ansible_connection: local
