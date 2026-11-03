@@ -1,37 +1,29 @@
 # Redis Worker Traffic
 
-This document lists every Redis record used between the Master and a Worker.
-Redis is the meeting point; the Master and Workers do not call each other over
-HTTP during inference.
+Master and Workers coordinate through Redis. Workers do not receive inference
+requests over HTTP.
 
-## Traffic overview
-
-| Direction | Redis operation | Key or stream | Data written | Read by |
-| --- | --- | --- | --- | --- |
-| Master → Worker | `XADD` | `cc:queue:<worker-id>` | Inference job JSON in `payload` | Target Worker only |
-| Master → Worker | `XADD` | `cc:control:<worker-id>` | Manual heartbeat request JSON in `payload` | Target Worker only |
-| Worker → Master | `HSET` + TTL | `cc:worker:<worker-id>` | Current Worker state and `last_seen_at` | Master and UI status endpoint |
-| Worker → Master | `SET` + TTL | `cc:result:<job-id>:<worker-id>` | Inference result JSON | Master job-status endpoint |
-| Worker → Master | `SET` + TTL | `cc:heartbeat-refresh:<request-id>:<worker-id>` | `acknowledged` | Master manual-refresh endpoint |
-| Worker → Redis | `XACK` | Original Stream entry | No payload; confirms one message was consumed | Redis Consumer Group |
-
-The Master reads Worker-originated records. It does not receive a direct TCP
-callback from a Worker.
-
-## Stream names
-
-| Stream | Target | Consumer group | Purpose |
+| Direction | Operation | Key or stream | Content |
 | --- | --- | --- | --- |
-| `cc:queue:<worker-id>` | One Worker | `cc-workers` | Run one inference job. |
-| `cc:control:<worker-id>` | One Worker | `cc-worker-controls` | Run a small control action without executing inference. |
+| Master -> Worker | `XADD` | `cc:queue:<worker-id>` | Inference job JSON |
+| Master -> Worker | `XADD` | `cc:control:<worker-id>` | Manual heartbeat request JSON |
+| Worker -> Redis | `HSET` + TTL | `cc:worker:<worker-id>` | State, time, current job |
+| Worker -> Redis | `SET` + TTL | `cc:result:<job-id>:<worker-id>` | Inference result JSON |
+| Worker -> Redis | `SET` + TTL | `cc:heartbeat-refresh:<request-id>:<worker-id>` | `acknowledged` |
+| Worker -> Redis | `XACK` | Original Stream entry | Consumer Group acknowledgement |
 
-For example, Node1 reads `cc:queue:node1` and `cc:control:node1`. Node2 never
-consumes either Node1 stream.
+## Streams read by one Worker
 
-## Inference job
+| Stream | Consumer group | Purpose |
+| --- | --- | --- |
+| `cc:queue:node1` | `cc-workers` | Inference jobs for Node1 |
+| `cc:control:node1` | `cc-worker-controls` | Control actions for Node1 |
 
-The Master uses `XADD cc:queue:<worker-id>` after it reserves a Worker. The
-Stream entry has one field named `payload`, containing this JSON document:
+Node2 uses the equivalent `node2` streams. A Worker reads only its own streams.
+
+## Inference message
+
+Master writes this value as the Stream `payload` field:
 
 ```json
 {
@@ -44,20 +36,13 @@ Stream entry has one field named `payload`, containing this JSON document:
 }
 ```
 
-`execution_mode` explains the request intent:
+`load_balance` goes to one selected idle Worker. `ensemble` writes the same job
+ID to both selected Worker streams.
 
-- `load_balance`: the Master writes the job to one selected idle Worker.
-- `ensemble`: the Master writes the same `job_id` to both selected Worker
-  streams. Each Worker produces one independent probability distribution.
+## Manual heartbeat message
 
-The Worker downloads `image_key` from RustFS, runs ONNX inference, writes its
-temporary result to `cc:result:<job-id>:<worker-id>`, then ACKs the Stream entry.
-
-## Manual heartbeat request
-
-The UI's **Retry worker connection** button calls
-`POST /inference/workers/refresh`. The Master writes one control message to
-each `cc:control:<worker-id>` stream.
+The Client calls `POST /inference/workers/refresh`. Master writes this payload
+to each control stream:
 
 ```json
 {
@@ -69,31 +54,14 @@ each `cc:control:<worker-id>` stream.
 }
 ```
 
-When a Worker consumes `publish_heartbeat`, it immediately refreshes its own
-`cc:worker:<worker-id>` hash and creates this short-lived acknowledgement key:
+The Worker publishes its heartbeat immediately, writes the ACK key, then ACKs
+the control Stream entry. Master waits up to
+`CC_WORKER_REFRESH_TIMEOUT_SECONDS`, currently 3 seconds.
 
-```text
-cc:heartbeat-refresh:<request-id>:<worker-id>
-```
+## Worker-written records
 
-The Master waits up to `CC_WORKER_REFRESH_TIMEOUT_SECONDS` for those keys, then
-returns both acknowledged and unresponsive Worker IDs to the UI. A missing
-acknowledgement does not prove a VM is permanently down; it means that Worker
-did not consume the control message within the requested window.
-
-## Why Stream control instead of Redis Pub/Sub
-
-The manual heartbeat is a command with an acknowledgement, not a broadcast
-notification. Redis Streams retain the message until the Worker consumer group
-ACKs it. Pub/Sub would drop the request if a Worker were briefly disconnected,
-which would make the UI unable to distinguish a missed notification from a
-non-responsive Worker.
-
-## Worker heartbeat record
-
-Each Worker writes this hash automatically every
-`CC_HEARTBEAT_INTERVAL_SECONDS` seconds. The manual control request writes the
-same record immediately instead of waiting for the next scheduled interval.
+Heartbeat Hash, written every `CC_HEARTBEAT_INTERVAL_SECONDS`, currently 5
+seconds:
 
 ```json
 {
@@ -104,13 +72,7 @@ same record immediately instead of waiting for the next scheduled interval.
 }
 ```
 
-The key is `cc:worker:node1` for Node1 and `cc:worker:node2` for Node2. Redis
-removes the key after `CC_HEARTBEAT_TTL_SECONDS` unless the Worker refreshes it.
-The Master reports a missing key as `offline`.
-
-## Worker inference result
-
-After a Worker finishes an inference job, it writes one temporary JSON record:
+Result String, written after inference:
 
 ```json
 {
@@ -119,10 +81,7 @@ After a Worker finishes an inference job, it writes one temporary JSON record:
   "worker_id": "node1",
   "status": "succeeded",
   "label": "recyclable",
-  "probabilities": {
-    "organic": 0.18,
-    "recyclable": 0.82
-  },
+  "probabilities": {"organic": 0.18, "recyclable": 0.82},
   "model_key": "models/baseline-mobilenetv3-small.onnx",
   "elapsed_ms": 83,
   "completed_at": "2026-11-03T10:00:01+00:00",
@@ -130,23 +89,5 @@ After a Worker finishes an inference job, it writes one temporary JSON record:
 }
 ```
 
-The result key is:
-
-```text
-cc:result:<job-id>:<worker-id>
-```
-
-For load balancing, the Master returns the single assigned Worker's result. For
-ensemble inference, the Master reads both result keys and averages each label's
-probability before choosing the highest averaged label.
-
-## Stream acknowledgement
-
-After writing either a successful or failed inference result, a Worker runs
-`XACK` for the original `cc:queue:<worker-id>` entry. After a manual heartbeat,
-it runs `XACK` for the original `cc:control:<worker-id>` entry.
-
-`XACK` has no JSON body. It changes Consumer Group state so Redis no longer
-marks the entry as pending. If a Worker stops before acknowledging an inference
-message, the Worker reclaims that pending message after restart with
-`XAUTOCLAIM`.
+`XACK` carries no JSON. It clears the Stream message from pending state. A
+restarted Worker reclaims pending inference messages with `XAUTOCLAIM`.
