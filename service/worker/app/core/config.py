@@ -10,9 +10,11 @@ class Settings(BaseSettings):
     heartbeat_ttl_seconds: int = Field(default=15, ge=2)
     heartbeat_interval_seconds: int = Field(default=5, ge=1)
     consumer_group_name: str = "cc-workers"
+    control_consumer_group_name: str = "cc-worker-controls"
     stream_block_ms: int = Field(default=1000, ge=100)
     pending_job_reclaim_idle_ms: int = Field(default=60_000, ge=1_000)
     result_ttl_seconds: int = Field(default=300, ge=30)
+    control_ack_ttl_seconds: int = Field(default=15, ge=2)
     rustfs_endpoint_url: str = "http://localhost:9000"
     rustfs_access_key: str = ""
     rustfs_secret_key: str = ""

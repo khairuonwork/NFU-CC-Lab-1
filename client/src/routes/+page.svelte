@@ -8,19 +8,22 @@
     ExecutionMode,
     InferenceJob,
     QueuedInference,
+    WorkerRefresh,
+    WorkerRefreshResponse,
     WorkerSnapshot,
   } from '#lib/types';
 
   type SubmissionState = 'idle' | 'uploading' | 'queued' | 'processing' | 'succeeded' | 'failed';
 
   const pollIntervalMs = 1_000;
-  const workerRefreshIntervalMs = 4_000;
+  const workerRefreshIntervalMs = 8_000;
 
   let workerSnapshot = $state<WorkerSnapshot | null>(null);
   let workerError = $state('');
   let workerLoading = $state(true);
   let selectedMode = $state<ExecutionMode>('load_balance');
   let selectedFile = $state<File | null>(null);
+  let selectedPreviewUrl = $state<string | null>(null);
   let fileInput = $state<HTMLInputElement | null>(null);
   let queuedInference = $state<QueuedInference | null>(null);
   let currentJob = $state<InferenceJob | null>(null);
@@ -28,16 +31,12 @@
   let submissionError = $state('');
   let pollRevision = 0;
   let heartbeatRevision = $state(0);
+  let connectionRetrying = $state(false);
+  let workerRefreshResult = $state<WorkerRefresh | null>(null);
 
   let selectedModeAvailability = $derived(workerSnapshot?.execution_modes[selectedMode] ?? null);
   let canSubmit = $derived(
-    Boolean(
-      selectedFile &&
-      selectedModeAvailability?.enabled &&
-      submissionState !== 'uploading' &&
-      submissionState !== 'queued' &&
-      submissionState !== 'processing',
-    ),
+    Boolean(selectedFile && selectedModeAvailability?.enabled && submissionState === 'idle'),
   );
 
   class ApiRequestError extends Error {
@@ -56,6 +55,7 @@
     return () => {
       window.clearInterval(timer);
       pollRevision += 1;
+      clearSelectedPreview();
     };
   });
 
@@ -90,12 +90,46 @@
 
   function handleFileChange(event: Event): void {
     const input = event.currentTarget as HTMLInputElement;
+    clearSelectedPreview();
     selectedFile = input.files?.[0] ?? null;
+    selectedPreviewUrl = selectedFile ? URL.createObjectURL(selectedFile) : null;
     submissionError = '';
+  }
+
+  function clearSelectedPreview(): void {
+    if (selectedPreviewUrl) {
+      URL.revokeObjectURL(selectedPreviewUrl);
+      selectedPreviewUrl = null;
+    }
+  }
+
+  async function retryWorkerConnection(): Promise<void> {
+    connectionRetrying = true;
+    workerLoading = true;
+    workerError = '';
+
+    try {
+      const response = await fetch('/api/inference/workers/refresh', {
+        method: 'POST',
+        headers: { accept: 'application/json' },
+      });
+      const refreshed = await readJson<WorkerRefreshResponse>(response);
+
+      workerSnapshot = refreshed;
+      workerRefreshResult = refreshed.refresh;
+      heartbeatRevision += 1;
+      ensureSelectedModeIsAvailable(refreshed);
+    } catch (error) {
+      workerError = errorMessage(error);
+    } finally {
+      connectionRetrying = false;
+      workerLoading = false;
+    }
   }
 
   function clearJobResult(): void {
     pollRevision += 1;
+    clearSelectedPreview();
     selectedFile = null;
     queuedInference = null;
     currentJob = null;
@@ -247,6 +281,19 @@
     }).format(value);
   }
 
+  function failedJobMessage(job: InferenceJob): string {
+    if (job.reason === 'job_timeout') {
+      const missingWorkers = job.missing_worker_ids?.join(', ') ?? 'a worker';
+      return `The job timed out while waiting for ${missingWorkers}.`;
+    }
+
+    if (job.reason === 'worker_failed') {
+      return 'A worker returned an error while processing this image.';
+    }
+
+    return 'The job failed before all workers returned a successful result.';
+  }
+
   function orderedProbabilities(
     probabilities: Record<string, number> | null | undefined,
   ): [string, number][] {
@@ -272,10 +319,11 @@
     <button
       class="secondary-button"
       type="button"
-      onclick={() => void refreshWorkers()}
-      disabled={workerLoading}
+      onclick={() => void retryWorkerConnection()}
+      disabled={workerLoading || connectionRetrying}
+      title="Recheck the Client-to-Master connection and the latest worker heartbeats."
     >
-      {workerLoading ? 'Refreshing…' : 'Refresh workers'}
+      {connectionRetrying ? 'Requesting heartbeat…' : 'Retry worker connection'}
     </button>
   </header>
 
@@ -284,6 +332,19 @@
       <strong>Worker status is unavailable.</strong>
       <span>{workerError}</span>
     </section>
+  {/if}
+
+  {#if workerRefreshResult}
+    <p class="refresh-result" role="status">
+      {#if workerRefreshResult.acknowledged_worker_ids.length > 0}
+        Fresh heartbeat: {workerRefreshResult.acknowledged_worker_ids.join(', ')}.
+      {:else}
+        No Worker acknowledged this heartbeat request.
+      {/if}
+      {#if workerRefreshResult.unresponsive_worker_ids.length > 0}
+        No reply within 3 seconds: {workerRefreshResult.unresponsive_worker_ids.join(', ')}.
+      {/if}
+    </p>
   {/if}
 
   <div class="layout">
@@ -358,12 +419,23 @@
         accept="image/jpeg,image/png,image/webp"
         bind:this={fileInput}
         onchange={handleFileChange}
+        disabled={submissionState !== 'idle'}
       />
       <p class="muted file-name" aria-live="polite">
         {selectedFile
           ? `${selectedFile.name} (${Math.ceil(selectedFile.size / 1024)} KB)`
           : 'Choose a JPG, PNG, or WebP image.'}
       </p>
+
+      {#if selectedPreviewUrl}
+        <figure class="image-preview">
+          <img
+            src={selectedPreviewUrl}
+            alt={`Preview of ${selectedFile?.name ?? 'selected image'}`}
+          />
+          <figcaption>The image is removed after all assigned Workers finish the job.</figcaption>
+        </figure>
+      {/if}
 
       <button
         class="primary-button"
@@ -460,7 +532,7 @@
         </div>
       {:else if currentJob?.status === 'failed'}
         <div class="notice error-notice" role="alert">
-          The job failed before all workers returned a successful result.
+          {failedJobMessage(currentJob)}
         </div>
         <div class="worker-result-grid">
           {#each currentJob.worker_results as workerResult (workerResult.worker_id)}
@@ -506,6 +578,12 @@
 
   .page-header {
     margin-bottom: 1.5rem;
+  }
+
+  .refresh-result {
+    margin: -0.75rem 0 1rem;
+    color: #aeb8c7;
+    font-size: 0.9rem;
   }
 
   h1,
@@ -692,6 +770,28 @@
     min-height: 1.35rem;
     margin: 0.45rem 0 1rem;
     font-size: 0.85rem;
+  }
+
+  .image-preview {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0 0 1rem;
+  }
+
+  .image-preview img {
+    width: 100%;
+    max-height: 18rem;
+    aspect-ratio: 4 / 3;
+    border: 1px solid #3a4657;
+    border-radius: 0.45rem;
+    object-fit: contain;
+    background: #0f141d;
+  }
+
+  .image-preview figcaption {
+    color: #aeb8c7;
+    font-size: 0.8rem;
+    line-height: 1.45;
   }
 
   button {

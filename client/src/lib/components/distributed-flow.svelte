@@ -1,7 +1,18 @@
 <script lang="ts">
+  import { animate } from 'motion';
+
   import type { InferenceJob, QueuedInference, WorkerSnapshot, WorkerStatus } from '#lib/types';
 
   type SubmissionState = 'idle' | 'uploading' | 'queued' | 'processing' | 'succeeded' | 'failed';
+  type PlaybackPhase = 'idle' | 'upload' | 'dispatch' | 'processing' | 'succeeded' | 'failed';
+  type PlaybackControls = { stop: () => void };
+
+  const playbackDuration = {
+    upload: 2_500,
+    dispatch: 4_000,
+    processing: 8_000,
+    result: 5_000,
+  } as const;
 
   let {
     snapshot,
@@ -17,20 +28,38 @@
     heartbeatRevision: number;
   } = $props();
 
+  let requestMap = $state<HTMLDivElement | null>(null);
+  let playbackPhase = $state<PlaybackPhase>('idle');
+  let playbackJobId = '';
+  let playbackRun = 0;
+  let motionControls: PlaybackControls[] = [];
+
   let assignedWorkerIds = $derived(queuedInference?.worker_ids ?? currentJob?.worker_ids ?? []);
   let executionMode = $derived(
     queuedInference?.execution_mode ?? currentJob?.execution_mode ?? null,
   );
-  let isActiveJob = $derived(
-    submissionState === 'uploading' ||
-      submissionState === 'queued' ||
-      submissionState === 'processing',
-  );
-  let hasSucceededResult = $derived(Boolean(queuedInference && submissionState === 'succeeded'));
-  let hasFailedResult = $derived(Boolean(queuedInference && submissionState === 'failed'));
   let jobFlowKey = $derived(
-    `${queuedInference?.job_id ?? 'no-job'}:${submissionState}:${assignedWorkerIds.join(',')}`,
+    `${queuedInference?.job_id ?? 'no-job'}:${assignedWorkerIds.join(',')}`,
   );
+
+  $effect(() => {
+    const jobId = queuedInference?.job_id ?? '';
+
+    if (jobId === playbackJobId) {
+      return;
+    }
+
+    playbackJobId = jobId;
+    playbackRun += 1;
+    stopMotion();
+
+    if (!jobId) {
+      playbackPhase = 'idle';
+      return;
+    }
+
+    void playInferenceRoute(jobId, playbackRun);
+  });
 
   function workerSummary(worker: WorkerStatus): string {
     if (worker.state === 'offline') {
@@ -48,6 +77,15 @@
     return `is-${worker.state}`;
   }
 
+  function workerRouteStatus(): string {
+    if (playbackPhase === 'upload') return 'Waiting for upload';
+    if (playbackPhase === 'dispatch') return 'Redis Stream queue';
+    if (playbackPhase === 'processing') return 'Running ONNX';
+    if (playbackPhase === 'succeeded') return 'Result returned';
+    if (playbackPhase === 'failed') return 'Job failed';
+    return 'Awaiting a queued job';
+  }
+
   function jobPathText(): string {
     if (submissionState === 'uploading') {
       return 'The image is being uploaded to the Master API.';
@@ -57,23 +95,118 @@
       return 'No inference job has been queued in this browser session.';
     }
 
-    if (submissionState === 'queued') {
-      return `The Master queued the job for ${assignedWorkerIds.join(' and ')}.`;
+    if (playbackPhase === 'upload') {
+      return 'Visual playback: Browser sends the image to the Master API.';
     }
 
-    if (submissionState === 'processing') {
+    if (playbackPhase === 'dispatch') {
+      return `Visual playback: Master dispatches to ${assignedWorkerIds.join(' and ')}.`;
+    }
+
+    if (playbackPhase === 'processing') {
+      if (submissionState === 'succeeded' || submissionState === 'failed') {
+        return 'The job has finished. The visual route is completing before it is marked complete.';
+      }
+
       return `${assignedWorkerIds.join(' and ')} ${assignedWorkerIds.length === 1 ? 'is' : 'are'} processing the image.`;
     }
 
-    if (submissionState === 'succeeded') {
-      return 'The Master received all required worker results.';
+    if (playbackPhase === 'succeeded') {
+      return 'Visual playback complete. The Master received all required worker results.';
     }
 
-    return 'The inference job finished with an error.';
+    if (playbackPhase === 'failed') {
+      return 'Visual playback complete. The inference job finished with an error.';
+    }
+
+    return 'The Master accepted the job. Visual playback is preparing the route.';
   }
 
   function modeLabel(): string {
     return executionMode === 'ensemble' ? 'Ensemble' : 'Load balancing';
+  }
+
+  async function playInferenceRoute(jobId: string, run: number): Promise<void> {
+    await delay(100);
+
+    if (!isCurrentPlayback(jobId, run)) return;
+
+    playbackPhase = 'upload';
+    animateRequestDots('upload', 'forward', playbackDuration.upload);
+    await delay(playbackDuration.upload);
+
+    if (!isCurrentPlayback(jobId, run)) return;
+
+    playbackPhase = 'dispatch';
+    animateRequestDots('dispatch', 'forward', playbackDuration.dispatch);
+    await delay(playbackDuration.dispatch);
+
+    if (!isCurrentPlayback(jobId, run)) return;
+
+    playbackPhase = 'processing';
+    await delay(playbackDuration.processing);
+
+    while (isCurrentPlayback(jobId, run)) {
+      const terminalStatus = currentTerminalStatus(jobId);
+
+      if (terminalStatus) {
+        playbackPhase = terminalStatus;
+        animateRequestDots('result', 'reverse', playbackDuration.result);
+        return;
+      }
+
+      await delay(1_000);
+    }
+  }
+
+  function currentTerminalStatus(jobId: string): 'succeeded' | 'failed' | null {
+    if (queuedInference?.job_id !== jobId) return null;
+    if (submissionState === 'succeeded' || submissionState === 'failed') return submissionState;
+    return null;
+  }
+
+  function isCurrentPlayback(jobId: string, run: number): boolean {
+    return playbackJobId === jobId && playbackRun === run;
+  }
+
+  function animateRequestDots(
+    stage: 'upload' | 'dispatch' | 'result',
+    direction: 'forward' | 'reverse',
+    durationMs: number,
+  ): void {
+    stopMotion();
+
+    if (!requestMap || prefersReducedMotion()) return;
+
+    const dots = [...requestMap.querySelectorAll<HTMLElement>(`[data-stage="${stage}"]`)];
+    const isVertical = window.matchMedia('(max-width: 46rem)').matches;
+
+    dots.forEach((dot, index) => {
+      const travel = direction === 'forward' ? 22 : -22;
+      const keyframes = isVertical
+        ? { opacity: [0, 1, 1, 0], y: [-travel, 0, 0, travel] }
+        : { opacity: [0, 1, 1, 0], x: [-travel, 0, 0, travel] };
+      const controls = animate(dot, keyframes, {
+        duration: durationMs / 1_000,
+        delay: index * 0.35,
+        ease: 'easeInOut',
+      });
+
+      motionControls.push(controls);
+    });
+  }
+
+  function stopMotion(): void {
+    for (const controls of motionControls) controls.stop();
+    motionControls = [];
+  }
+
+  function prefersReducedMotion(): boolean {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function delay(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
   }
 </script>
 
@@ -109,18 +242,14 @@
             {/each}
           </div>
 
-          <div class="flow-connection heartbeat-connection" aria-hidden="true">
-            <span></span>
-          </div>
+          <div class="flow-connection heartbeat-connection" aria-hidden="true"><span></span></div>
 
           <article class="flow-node redis-node">
             <strong>Redis</strong>
             <span>Worker hashes and reservations</span>
           </article>
 
-          <div class="flow-connection heartbeat-connection" aria-hidden="true">
-            <span></span>
-          </div>
+          <div class="flow-connection heartbeat-connection" aria-hidden="true"><span></span></div>
 
           <article class="flow-node master-node">
             <strong>Master API</strong>
@@ -145,9 +274,12 @@
 
     {#key jobFlowKey}
       <div
-        class:job-active={isActiveJob}
-        class:result-succeeded={hasSucceededResult}
-        class:result-failed={hasFailedResult}
+        bind:this={requestMap}
+        class:phase-upload={playbackPhase === 'upload'}
+        class:phase-dispatch={playbackPhase === 'dispatch'}
+        class:phase-processing={playbackPhase === 'processing'}
+        class:result-succeeded={playbackPhase === 'succeeded'}
+        class:result-failed={playbackPhase === 'failed'}
         class="request-map"
         aria-live="polite"
       >
@@ -157,7 +289,8 @@
         </article>
 
         <div class="flow-connection request-connection" aria-hidden="true">
-          <span></span>
+          <span data-stage="upload"></span>
+          <span class="result-dot" data-stage="result"></span>
         </div>
 
         <article class="flow-node master-node">
@@ -165,8 +298,14 @@
           <span>Upload, reserve, dispatch</span>
         </article>
 
-        <div class="flow-connection request-connection" aria-hidden="true">
-          <span></span>
+        <div class="flow-connection request-connection dispatch-connection" aria-hidden="true">
+          {#if executionMode === 'ensemble'}
+            <span class="ensemble-first" data-stage="dispatch"></span>
+            <span class="ensemble-second" data-stage="dispatch"></span>
+          {:else}
+            <span data-stage="dispatch"></span>
+          {/if}
+          <span class="result-dot" data-stage="result"></span>
         </div>
 
         <div class="assigned-workers" aria-label="Workers selected for the current job">
@@ -174,15 +313,7 @@
             {#each assignedWorkerIds as workerId (workerId)}
               <article class="flow-node assigned-worker">
                 <strong>{workerId}</strong>
-                <span>
-                  {submissionState === 'succeeded'
-                    ? 'Result returned'
-                    : submissionState === 'failed'
-                      ? 'Job failed'
-                      : submissionState === 'processing'
-                        ? 'Running ONNX'
-                        : 'Redis Stream queue'}
-                </span>
+                <span>{workerRouteStatus()}</span>
               </article>
             {/each}
           {:else}
@@ -221,7 +352,9 @@
   .flow-heading h2,
   .flow-block-heading h3,
   .flow-heading p,
-  .flow-block-heading p {
+  .flow-block-heading p,
+  .flow-status,
+  .flow-empty {
     margin: 0;
   }
 
@@ -371,32 +504,48 @@
     height: 0.45rem;
     border-radius: 50%;
     background: #a9c8ff;
+    opacity: 0;
+    will-change: opacity, transform;
   }
 
   .heartbeat-connection span {
-    animation: heartbeat-travel 1.6s ease-out both;
+    animation: heartbeat-travel 10s ease-in-out both;
   }
 
-  .job-active .request-connection span {
-    animation: request-travel 2.2s ease-in-out both;
-  }
-
-  .result-succeeded .request-connection span,
-  .result-failed .request-connection span {
-    animation: result-travel 3.2s linear infinite;
-  }
-
-  .result-succeeded .request-connection span {
+  .request-map.result-succeeded .result-dot {
     background: #9fddba;
   }
 
-  .result-failed .request-connection span {
+  .request-map.result-failed .result-dot {
     background: #ffadb5;
+  }
+
+  .dispatch-connection .ensemble-first {
+    top: 30%;
+  }
+
+  .dispatch-connection .ensemble-second {
+    top: 70%;
+  }
+
+  .phase-upload .browser-node,
+  .phase-dispatch .master-node,
+  .phase-processing .assigned-worker {
+    border-color: #a9c8ff;
+  }
+
+  .result-succeeded .assigned-worker,
+  .result-succeeded .master-node {
+    border-color: #63a97f;
+  }
+
+  .result-failed .assigned-worker,
+  .result-failed .master-node {
+    border-color: #c76d77;
   }
 
   .flow-status,
   .flow-empty {
-    margin: 0;
     line-height: 1.5;
   }
 
@@ -416,51 +565,8 @@
     }
   }
 
-  @keyframes request-travel {
-    from {
-      opacity: 0;
-      transform: translateX(-1.25rem);
-    }
-
-    25% {
-      opacity: 1;
-    }
-
-    75% {
-      opacity: 1;
-    }
-
-    to {
-      opacity: 0;
-      transform: translateX(1.25rem);
-    }
-  }
-
-  @keyframes result-travel {
-    from {
-      opacity: 0;
-      transform: translateX(1.25rem);
-    }
-
-    25% {
-      opacity: 1;
-    }
-
-    75% {
-      opacity: 1;
-    }
-
-    to {
-      opacity: 0;
-      transform: translateX(-1.25rem);
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
-    .heartbeat-connection span,
-    .job-active .request-connection span,
-    .result-succeeded .request-connection span,
-    .result-failed .request-connection span {
+    .heartbeat-connection span {
       animation: none;
     }
   }
@@ -500,22 +606,26 @@
       bottom: 0.08rem;
       border-top: 0.4rem solid #748397;
       border-right: 0.28rem solid transparent;
-      border-left: 0.28rem solid transparent;
       border-bottom: 0;
+      border-left: 0.28rem solid transparent;
     }
 
-    .heartbeat-connection span,
-    .job-active .request-connection span {
-      animation-name: vertical-travel;
+    .dispatch-connection .ensemble-first {
+      top: auto;
+      left: 30%;
     }
 
-    .result-succeeded .request-connection span,
-    .result-failed .request-connection span {
-      animation-name: vertical-result-travel;
+    .dispatch-connection .ensemble-second {
+      top: auto;
+      left: 70%;
+    }
+
+    .heartbeat-connection span {
+      animation-name: vertical-heartbeat-travel;
     }
   }
 
-  @keyframes vertical-travel {
+  @keyframes vertical-heartbeat-travel {
     from {
       opacity: 0;
       transform: translateY(-0.5rem);
@@ -528,26 +638,6 @@
     to {
       opacity: 0;
       transform: translateY(0.5rem);
-    }
-  }
-
-  @keyframes vertical-result-travel {
-    from {
-      opacity: 0;
-      transform: translateY(0.5rem);
-    }
-
-    25% {
-      opacity: 1;
-    }
-
-    75% {
-      opacity: 1;
-    }
-
-    to {
-      opacity: 0;
-      transform: translateY(-0.5rem);
     }
   }
 </style>

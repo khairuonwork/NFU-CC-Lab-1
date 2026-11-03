@@ -3,9 +3,11 @@
 worker_runtime_heartbeat_ttl_seconds: 15
 worker_runtime_heartbeat_interval_seconds: 5
 worker_runtime_consumer_group_name: cc-workers
+worker_runtime_control_consumer_group_name: cc-worker-controls
 worker_runtime_stream_block_ms: 1000
 worker_runtime_pending_job_reclaim_idle_ms: 60000
 worker_runtime_result_ttl_seconds: 300
+worker_runtime_control_ack_ttl_seconds: 15
 
 # Redis and RustFS run on NodeMaster and are reached through the guest network.
 worker_runtime_master_host: 192.168.4.168

@@ -22,6 +22,16 @@ export interface WorkerSnapshot {
   execution_modes: Record<ExecutionMode, ExecutionModeAvailability>;
 }
 
+export interface WorkerRefresh {
+  request_id: string;
+  acknowledged_worker_ids: string[];
+  unresponsive_worker_ids: string[];
+}
+
+export interface WorkerRefreshResponse extends WorkerSnapshot {
+  refresh: WorkerRefresh;
+}
+
 export interface QueuedInference {
   status: 'queued';
   job_id: string;
@@ -53,6 +63,8 @@ export interface InferenceSummary {
 export interface InferenceJob {
   job_id: string;
   status: 'queued' | 'processing' | 'succeeded' | 'failed';
+  reason?: 'job_timeout' | 'worker_failed';
+  missing_worker_ids?: string[];
   image_key: string;
   execution_mode: ExecutionMode;
   worker_ids: string[];

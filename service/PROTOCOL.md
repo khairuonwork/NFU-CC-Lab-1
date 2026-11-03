@@ -2,6 +2,10 @@
 
 This document defines the first runtime contract between the master controller and a worker.
 
+See [Redis Worker Messages](../docs/redis-worker-messages.md) for every Redis
+Stream message addressed to a Worker, including the manual heartbeat control
+message.
+
 ## Scope
 
 Version 1 covers inference only. Training will use a separate contract after the inference path works end-to-end.
@@ -14,6 +18,8 @@ Version 1 covers inference only. Training will use a separate contract after the
 | `cc:worker:node2` | Hash with TTL | Node2 heartbeat and current state |
 | `cc:queue:node1` | Stream | Inference jobs reserved for Node1 |
 | `cc:queue:node2` | Stream | Inference jobs reserved for Node2 |
+| `cc:control:node1` | Stream | Manual control messages for Node1 |
+| `cc:control:node2` | Stream | Manual control messages for Node2 |
 | `cc:result:<job-id>:<worker-id>` | String with TTL | Temporary inference result |
 | `cc:job:<job-id>` | Hash with TTL | Temporary job metadata for UI polling |
 
@@ -74,7 +80,9 @@ Allowed `state` values are `idle`, `busy`, and `training`.
 
 ## Image upload
 
-The master accepts `multipart/form-data` at `POST /inference/images`. The client must provide an image file and an explicit `execution_mode`. The master stores the file under `uploads/inference/<uuid>.<suffix>`, builds an `InferenceOrder`, then creates worker jobs. If no worker can be reserved, the master deletes that newly uploaded object.
+The master accepts `multipart/form-data` at `POST /inference/images`. The client must provide an image file and an explicit `execution_mode`. The master accepts JPG, JPEG, PNG, and WEBP files up to the configured upload limit, verifies that the file content matches its extension, then stores it under `uploads/inference/<uuid>.<suffix>`.
+
+The uploaded object is deleted when every assigned worker has returned a result. If no worker can be reserved, the master deletes it immediately. A timed-out job retains its input temporarily because a late worker may still be reading it. The Master also removes any inference upload older than the configured retention window, including jobs whose browser session was closed.
 
 ## Inference order
 
@@ -89,7 +97,7 @@ The UI sends an `InferenceOrder` to `POST /inference/orders` when its image alre
 
 ## Inference job
 
-The master writes one JSON payload into the selected worker stream using `XADD cc:queue:<worker-id> payload '<json>'`. The worker downloads `image_key` from RustFS and uses the model configured for that worker.
+The master writes one JSON payload into the selected worker stream using `XADD cc:queue:<worker-id> payload '<json>'`. Each stream keeps only the configured maximum number of entries so acknowledged inference history does not grow without bound. The worker downloads `image_key` from RustFS and uses the model configured for that worker.
 
 ```json
 {
@@ -131,6 +139,10 @@ The worker writes a short-lived result under `cc:result:<job-id>:<worker-id>`.
 ```
 
 A failed result has `status: "failed"` and an `error` string instead of classification output.
+
+## Job timeout
+
+The master derives a job timeout from `submitted_at`. If the configured timeout passes before every assigned worker returns a result, `GET /inference/jobs/<job-id>` returns `status: "failed"`, `reason: "job_timeout"`, and `missing_worker_ids`. The UI can show a clear failure instead of polling until the Redis job TTL expires.
 
 ## Pending job recovery
 

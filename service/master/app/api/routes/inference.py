@@ -38,6 +38,15 @@ async def get_worker_statuses(request: Request) -> JSONResponse:
         content=await dispatcher.read_worker_statuses(),
     )
 
+
+@router.post("/workers/refresh")
+async def refresh_worker_heartbeats(request: Request) -> JSONResponse:
+    dispatcher = JobDispatcher(request.app.state.redis, get_settings())
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=await dispatcher.request_fresh_heartbeats(),
+    )
+
 # Accept an explicit UI order for an existing image in RustFS.
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
 async def submit_inference_order(
@@ -64,7 +73,8 @@ async def submit_inference_order(
 # Read temporary job state and results for UI polling
 @router.get("/jobs/{job_id}")
 async def get_inference_job(job_id: str, request: Request) -> JSONResponse:
-    job = await read_inference_job(request.app.state.redis, job_id)
+    settings = get_settings()
+    job = await read_inference_job(request.app.state.redis, job_id, settings)
 
     if not job:
         return JSONResponse(
@@ -75,6 +85,29 @@ async def get_inference_job(job_id: str, request: Request) -> JSONResponse:
                 "job_id": job_id,
             },
         )
+
+    delete_image_on_completion, input_deleted = await request.app.state.redis.hmget(
+        f"cc:job:{job_id}",
+        "delete_image_on_completion",
+        "input_deleted",
+    )
+    is_complete = len(job["worker_results"]) == len(job["worker_ids"])
+
+    if (
+        job["status"] in {"succeeded", "failed"}
+        and is_complete
+        and delete_image_on_completion == "true"
+        and input_deleted != "true"
+    ):
+        try:
+            await delete_object(request.app.state.rustfs, settings, job["image_key"])
+            await request.app.state.redis.hset(
+                f"cc:job:{job_id}",
+                mapping={"input_deleted": "true"},
+            )
+        except Exception:
+            # Keep the inference result available and retry deletion on the next poll.
+            pass
 
     return JSONResponse(status_code=status.HTTP_200_OK, content=job)
 
@@ -106,6 +139,7 @@ async def upload_and_queue_inference(
     order = InferenceOrder(
         image_key=object_key,
         execution_mode=execution_mode,
+        delete_image_on_completion=True,
     )
 
     try:

@@ -13,12 +13,18 @@ class Settings(BaseSettings):
     worker_ids_csv: str = "node1,node2"
     worker_reservation_ttl_seconds: int = Field(default=30, ge=5)
     job_ttl_seconds: int = Field(default=300, ge=30)
+    job_timeout_seconds: int = Field(default=60, ge=5)
+    stream_max_length: int = Field(default=1_000, ge=100)
+    worker_refresh_timeout_seconds: float = Field(default=3, ge=0.5, le=10)
 
     rustfs_endpoint_url: str = "http://localhost:9000"
     rustfs_access_key: str = ""
     rustfs_secret_key: str = ""
     rustfs_region: str = "tw-taipei-1"
     rustfs_bucket: str = "cc-lab"
+    upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    upload_retention_seconds: int = Field(default=3_600, ge=60)
+    upload_cleanup_interval_seconds: int = Field(default=300, ge=30)
 
     @property
     def worker_id_list(self) -> tuple[str, ...]:
