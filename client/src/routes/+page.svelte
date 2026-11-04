@@ -312,9 +312,8 @@
 <main>
   <header class="page-header">
     <div>
-      <p class="eyebrow">CC Lab</p>
       <h1>Waste classification</h1>
-      <p class="summary">Submit one image and run it through the available inference workers.</p>
+      <p class="summary">Choose an image, select a mode, then send it to the available workers.</p>
     </div>
     <button
       class="secondary-button"
@@ -351,7 +350,6 @@
     <section class="panel workers-panel" aria-labelledby="workers-heading">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Capacity</p>
           <h2 id="workers-heading">Workers</h2>
         </div>
         {#if workerSnapshot}
@@ -383,7 +381,6 @@
     <section class="panel submit-panel" aria-labelledby="submit-heading">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Inference request</p>
           <h2 id="submit-heading">Choose a mode and image</h2>
         </div>
       </div>
@@ -467,7 +464,6 @@
   <section class="panel result-panel" aria-labelledby="result-heading">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Job result</p>
         <h2 id="result-heading">Inference status</h2>
       </div>
       <div class="result-actions">
@@ -523,7 +519,11 @@
               <span>{workerResult.status}</span>
               {#if workerResult.status === 'succeeded'}
                 <span>{workerResult.label}</span>
-                <span>{workerResult.elapsed_ms ?? '—'} ms</span>
+                <span>
+                  {workerResult.elapsed_ms === null
+                    ? 'Time not reported'
+                    : `${workerResult.elapsed_ms} ms`}
+                </span>
               {:else}
                 <span>{workerResult.error ?? 'Worker did not return a result.'}</span>
               {/if}
@@ -560,7 +560,7 @@
 
 <style>
   main {
-    width: min(100% - 2rem, 70rem);
+    width: min(100% - 2rem, 66rem);
     margin: 0 auto;
     padding: 2rem 0 3rem;
   }
@@ -582,7 +582,7 @@
 
   .refresh-result {
     margin: -0.75rem 0 1rem;
-    color: #aeb8c7;
+    color: #4c5a6b;
     font-size: 0.9rem;
   }
 
@@ -593,26 +593,18 @@
   }
 
   h1 {
-    font-size: clamp(1.8rem, 4vw, 2.6rem);
-    letter-spacing: -0.04em;
+    color: #172231;
+    font-size: clamp(1.8rem, 4vw, 2.35rem);
+    letter-spacing: -0.03em;
   }
 
   h2 {
     font-size: 1.15rem;
   }
 
-  .eyebrow {
-    margin-bottom: 0.35rem;
-    color: #9fb3c8;
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
   .summary,
   .muted {
-    color: #aeb8c7;
+    color: #596575;
   }
 
   .summary {
@@ -630,9 +622,9 @@
 
   .panel,
   .notice {
-    border: 1px solid #303948;
-    border-radius: 0.75rem;
-    background: #181e29;
+    border: 1px solid #d4d9df;
+    border-radius: 0.5rem;
+    background: #ffffff;
   }
 
   .panel {
@@ -647,14 +639,14 @@
   }
 
   .error-notice {
-    border-color: #85484e;
-    color: #ffd9dc;
-    background: #351d24;
+    border-color: #c78b8d;
+    color: #762b31;
+    background: #fff5f5;
   }
 
   .availability-summary,
   .state-pill {
-    border-radius: 999px;
+    border-radius: 0.25rem;
     padding: 0.3rem 0.6rem;
     font-size: 0.78rem;
     font-weight: 700;
@@ -664,22 +656,22 @@
   .availability-summary,
   .state-pill.idle,
   .state-pill.succeeded {
-    color: #b4f2cb;
-    background: #133d2c;
+    color: #24663e;
+    background: #eaf6ee;
   }
 
   .state-pill.busy,
   .state-pill.reserved,
   .state-pill.queued,
   .state-pill.processing {
-    color: #ffe5aa;
-    background: #4b3918;
+    color: #77500d;
+    background: #fff4d7;
   }
 
   .state-pill.offline,
   .state-pill.failed {
-    color: #ffd9dc;
-    background: #54252d;
+    color: #8b2f35;
+    background: #fff0f0;
   }
 
   .worker-list,
@@ -694,7 +686,7 @@
   .worker-row {
     align-items: start;
     padding-bottom: 0.75rem;
-    border-bottom: 1px solid #303948;
+    border-bottom: 1px solid #e1e4e8;
   }
 
   .worker-row:last-child {
@@ -732,14 +724,14 @@
     gap: 0.75rem;
     align-items: flex-start;
     padding: 0.8rem;
-    border: 1px solid #3a4657;
-    border-radius: 0.55rem;
+    border: 1px solid #c7ced7;
+    border-radius: 0.35rem;
     cursor: pointer;
   }
 
   .mode-option:has(input:checked) {
-    border-color: #7ea9f9;
-    background: #182940;
+    border-color: #1769cc;
+    background: #f2f7ff;
   }
 
   .mode-option.disabled {
@@ -753,7 +745,7 @@
   }
 
   .mode-unavailable {
-    color: #ffd78d;
+    color: #80570e;
   }
 
   .file-label {
@@ -763,7 +755,7 @@
 
   input[type='file'] {
     width: 100%;
-    color: #cbd5e1;
+    color: #344255;
   }
 
   .file-name {
@@ -782,14 +774,14 @@
     width: 100%;
     max-height: 18rem;
     aspect-ratio: 4 / 3;
-    border: 1px solid #3a4657;
-    border-radius: 0.45rem;
+    border: 1px solid #c7ced7;
+    border-radius: 0.35rem;
     object-fit: contain;
-    background: #0f141d;
+    background: #f8f9fa;
   }
 
   .image-preview figcaption {
-    color: #aeb8c7;
+    color: #596575;
     font-size: 0.8rem;
     line-height: 1.45;
   }
@@ -810,22 +802,22 @@
 
   .primary-button {
     width: 100%;
-    color: #07121f;
-    background: #9fc3ff;
+    color: #ffffff;
+    background: #1769cc;
   }
 
   .primary-button:not(:disabled):hover {
-    background: #c2d9ff;
+    background: #0f56aa;
   }
 
   .secondary-button {
-    color: #dce6f3;
-    border: 1px solid #465365;
-    background: transparent;
+    color: #263445;
+    border: 1px solid #aeb7c2;
+    background: #ffffff;
   }
 
   .secondary-button:not(:disabled):hover {
-    background: #242d3a;
+    background: #eef3f8;
   }
 
   .result-panel {
@@ -846,7 +838,7 @@
     display: grid;
     gap: 0.4rem;
     margin: 1rem 0;
-    color: #b7c3d3;
+    color: #4f5c6c;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.8rem;
     overflow-wrap: anywhere;
@@ -857,7 +849,7 @@
   }
 
   .prediction-label {
-    color: #aeb8c7;
+    color: #596575;
     font-size: 0.8rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -865,7 +857,7 @@
 
   .prediction-value {
     margin-top: 0.2rem;
-    color: #d7e6ff;
+    color: #163f76;
     font-size: clamp(1.6rem, 4vw, 2.3rem);
     font-weight: 800;
     text-transform: capitalize;
@@ -880,13 +872,13 @@
     height: 0.55rem;
     overflow: hidden;
     border-radius: 99px;
-    background: #303948;
+    background: #e0e5ea;
   }
 
   .probability-fill {
     height: 100%;
     border-radius: inherit;
-    background: #84b6ff;
+    background: #1769cc;
   }
 
   .worker-result-grid {
@@ -898,13 +890,13 @@
 
   .worker-result {
     padding: 0.8rem;
-    border: 1px solid #303948;
-    border-radius: 0.5rem;
-    color: #b7c3d3;
+    border: 1px solid #d4d9df;
+    border-radius: 0.35rem;
+    color: #4f5c6c;
   }
 
   .worker-result strong {
-    color: #eef4ff;
+    color: #1b2736;
   }
 
   @media (max-width: 46rem) {
