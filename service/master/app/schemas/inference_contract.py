@@ -13,6 +13,7 @@ class ExecutionMode(StrEnum):
 class InferenceOrder(BaseModel):
     image_key: str = Field(min_length=1)
     execution_mode: ExecutionMode
+    delete_image_on_completion: bool = False
 
 # JSON payload from Master to Worker Redis Stream.
 class InferenceJob(BaseModel):

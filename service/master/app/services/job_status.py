@@ -1,13 +1,19 @@
 import json
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from redis.asyncio import Redis
 
+from app.core.config import Settings
 from app.schemas.inference_contract import InferenceResult
 
 # Read temporary job state and any worker results from Redis
-async def read_inference_job(redis: Redis, job_id: str) -> dict[str, Any] | None:
+async def read_inference_job(
+    redis: Redis,
+    job_id: str,
+    settings: Settings,
+) -> dict[str, Any] | None:
     metadata = await redis.hgetall(f"cc:job:{job_id}")
     if not metadata:
         return None
@@ -21,7 +27,13 @@ async def read_inference_job(redis: Redis, job_id: str) -> dict[str, Any] | None
             result = InferenceResult.model_validate_json(raw_result)
             worker_results.append(result.model_dump(mode="json"))
 
-    state = _resolve_state(metadata["status"], worker_ids, worker_results)
+    state, reason = _resolve_state(
+        metadata["status"],
+        metadata["submitted_at"],
+        worker_ids,
+        worker_results,
+        settings.job_timeout_seconds,
+    )
     response: dict[str, Any] = {
         "job_id": job_id,
         "status": state,
@@ -34,26 +46,42 @@ async def read_inference_job(redis: Redis, job_id: str) -> dict[str, Any] | None
     if state == "succeeded":
         response["result"] = _build_result(metadata["execution_mode"], worker_results)
 
+    if reason:
+        response["reason"] = reason
+        response["missing_worker_ids"] = [
+            worker_id
+            for worker_id in worker_ids
+            if worker_id not in {result["worker_id"] for result in worker_results}
+        ]
+
     return response
 
 # Resolve UI state from the job record and available worker results
 def _resolve_state(
     stored_state: str,
+    submitted_at: str,
     worker_ids: list[str],
     worker_results: list[dict[str, Any]],
-) -> str:
+    job_timeout_seconds: int,
+) -> tuple[str, str | None]:
     if len(worker_results) < len(worker_ids):
-        return stored_state
+        deadline = datetime.fromisoformat(submitted_at) + timedelta(
+            seconds=job_timeout_seconds,
+        )
+        if datetime.now(timezone.utc) >= deadline:
+            return "failed", "job_timeout"
+
+        return stored_state, None
 
     if any(result["status"] == "failed" for result in worker_results):
-        return "failed"
+        return "failed", "worker_failed"
 
-    return "succeeded"
+    return "succeeded", None
 
 # Return one result for load balance or averaged probabilities for ensemble
 def _build_result(
     execution_mode: str,
-    worker_results: list[dict[str, Any]],
+    worker_results: list[dict[str, Any]], # label: score
 ) -> dict[str, Any]:
     if execution_mode == "load_balance":
         return worker_results[0]

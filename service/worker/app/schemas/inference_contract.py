@@ -9,6 +9,14 @@ class ExecutionMode(StrEnum):
     LOAD_BALANCE = "load_balance"
     ENSEMBLE = "ensemble"
 
+
+class WorkerControlMessage(BaseModel):
+    schema_version: Literal[1] = 1
+    message_type: Literal["worker_control"] = "worker_control"
+    command: Literal["publish_heartbeat"] = "publish_heartbeat"
+    request_id: UUID
+    requested_at: datetime
+
 class InferenceJob(BaseModel):
     schema_version: Literal[1] = 1
     job_id: UUID

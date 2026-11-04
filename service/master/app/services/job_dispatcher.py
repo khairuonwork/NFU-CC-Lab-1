@@ -1,3 +1,4 @@
+import asyncio
 import json
 import random
 from datetime import datetime, timezone
@@ -78,6 +79,85 @@ class JobDispatcher:
             },
         }
 
+    async def request_fresh_heartbeats(self) -> dict[str, object]:
+        request_id = uuid4()
+        worker_ids = list(self.settings.worker_id_list)
+        payload = json.dumps(
+            {
+                "schema_version": 1,
+                "message_type": "worker_control",
+                "command": "publish_heartbeat",
+                "request_id": str(request_id),
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        async with self.redis.pipeline(transaction=False) as pipeline:
+            for worker_id in worker_ids:
+                pipeline.xadd(
+                    f"cc:control:{worker_id}",
+                    {"payload": payload},
+                    maxlen=self.settings.stream_max_length,
+                    approximate=True,
+                )
+            await pipeline.execute()
+
+        acknowledged_workers = await self._wait_for_heartbeat_acks(
+            str(request_id),
+            worker_ids,
+        )
+        snapshot = await self.read_worker_statuses()
+        acknowledged_worker_set = set(acknowledged_workers)
+
+        return {
+            **snapshot,
+            "refresh": {
+                "request_id": str(request_id),
+                "acknowledged_worker_ids": acknowledged_workers,
+                "unresponsive_worker_ids": [
+                    worker_id
+                    for worker_id in worker_ids
+                    if worker_id not in acknowledged_worker_set
+                ],
+            },
+        }
+
+    async def _wait_for_heartbeat_acks(
+        self,
+        request_id: str,
+        worker_ids: list[str],
+    ) -> list[str]:
+        deadline = (
+            asyncio.get_running_loop().time()
+            + self.settings.worker_refresh_timeout_seconds
+        )
+        acknowledged_workers: list[str] = []
+
+        while True:
+            acknowledgements = await self.redis.mget(
+                [
+                    f"cc:heartbeat-refresh:{request_id}:{worker_id}"
+                    for worker_id in worker_ids
+                ]
+            )
+            acknowledged_workers = [
+                worker_id
+                for worker_id, acknowledgement in zip(
+                    worker_ids,
+                    acknowledgements,
+                    strict=True,
+                )
+                if acknowledgement == "acknowledged"
+            ]
+
+            if len(acknowledged_workers) == len(worker_ids):
+                return acknowledged_workers
+
+            if asyncio.get_running_loop().time() >= deadline:
+                return acknowledged_workers
+
+            await asyncio.sleep(0.1)
+
     # Create one job, reserve enough workers, then send the Stream messages.
     async def _queue_order(
         self,
@@ -94,7 +174,11 @@ class JobDispatcher:
 
         try:
             # Store before XADD so a fast worker cannot overwrite its status.
-            await self._store_job_metadata(job, worker_ids)
+            await self._store_job_metadata(
+                job,
+                worker_ids,
+                order.delete_image_on_completion,
+            )
             await self._publish_job(job, worker_ids)
         except Exception:
             await self.redis.delete(f"cc:job:{job.job_id}")
@@ -114,6 +198,8 @@ class JobDispatcher:
             await self.redis.xadd(
                 f"cc:queue:{worker_id}",
                 {"payload": payload},
+                maxlen=self.settings.stream_max_length,
+                approximate=True,
             )
 
     # Read heartbeat hashes and short reservation locks in one Redis round trip.
@@ -155,6 +241,7 @@ class JobDispatcher:
         self,
         job: InferenceJob,
         worker_ids: list[str],
+        delete_image_on_completion: bool,
     ) -> None:
         job_key = f"cc:job:{job.job_id}"
         await self.redis.hset(
@@ -165,6 +252,7 @@ class JobDispatcher:
                 "execution_mode": job.execution_mode,
                 "worker_ids": json.dumps(worker_ids),
                 "submitted_at": job.submitted_at.isoformat(),
+                "delete_image_on_completion": str(delete_image_on_completion).lower(),
             },
         )
         await self.redis.expire(job_key, self.settings.job_ttl_seconds)

@@ -10,6 +10,12 @@ master_runtime_worker_ids:
 # Master Controller temporary Redis state
 master_runtime_worker_reservation_ttl_seconds: 30
 master_runtime_job_ttl_seconds: 300
+master_runtime_job_timeout_seconds: 60
+master_runtime_stream_max_length: 1000
+master_runtime_worker_refresh_timeout_seconds: 3
+master_runtime_upload_max_bytes: 10485760
+master_runtime_upload_retention_seconds: 3600
+master_runtime_upload_cleanup_seconds: 300
 
 # RustFS stores all source images and model artifacts.
 master_runtime_rustfs_region: tw-taipei-1

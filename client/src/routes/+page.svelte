@@ -8,19 +8,22 @@
     ExecutionMode,
     InferenceJob,
     QueuedInference,
+    WorkerRefresh,
+    WorkerRefreshResponse,
     WorkerSnapshot,
   } from '#lib/types';
 
   type SubmissionState = 'idle' | 'uploading' | 'queued' | 'processing' | 'succeeded' | 'failed';
 
   const pollIntervalMs = 1_000;
-  const workerRefreshIntervalMs = 4_000;
+  const workerRefreshIntervalMs = 8_000;
 
   let workerSnapshot = $state<WorkerSnapshot | null>(null);
   let workerError = $state('');
   let workerLoading = $state(true);
   let selectedMode = $state<ExecutionMode>('load_balance');
   let selectedFile = $state<File | null>(null);
+  let selectedPreviewUrl = $state<string | null>(null);
   let fileInput = $state<HTMLInputElement | null>(null);
   let queuedInference = $state<QueuedInference | null>(null);
   let currentJob = $state<InferenceJob | null>(null);
@@ -28,16 +31,12 @@
   let submissionError = $state('');
   let pollRevision = 0;
   let heartbeatRevision = $state(0);
+  let connectionRetrying = $state(false);
+  let workerRefreshResult = $state<WorkerRefresh | null>(null);
 
   let selectedModeAvailability = $derived(workerSnapshot?.execution_modes[selectedMode] ?? null);
   let canSubmit = $derived(
-    Boolean(
-      selectedFile &&
-      selectedModeAvailability?.enabled &&
-      submissionState !== 'uploading' &&
-      submissionState !== 'queued' &&
-      submissionState !== 'processing',
-    ),
+    Boolean(selectedFile && selectedModeAvailability?.enabled && submissionState === 'idle'),
   );
 
   class ApiRequestError extends Error {
@@ -56,6 +55,7 @@
     return () => {
       window.clearInterval(timer);
       pollRevision += 1;
+      clearSelectedPreview();
     };
   });
 
@@ -90,12 +90,46 @@
 
   function handleFileChange(event: Event): void {
     const input = event.currentTarget as HTMLInputElement;
+    clearSelectedPreview();
     selectedFile = input.files?.[0] ?? null;
+    selectedPreviewUrl = selectedFile ? URL.createObjectURL(selectedFile) : null;
     submissionError = '';
+  }
+
+  function clearSelectedPreview(): void {
+    if (selectedPreviewUrl) {
+      URL.revokeObjectURL(selectedPreviewUrl);
+      selectedPreviewUrl = null;
+    }
+  }
+
+  async function retryWorkerConnection(): Promise<void> {
+    connectionRetrying = true;
+    workerLoading = true;
+    workerError = '';
+
+    try {
+      const response = await fetch('/api/inference/workers/refresh', {
+        method: 'POST',
+        headers: { accept: 'application/json' },
+      });
+      const refreshed = await readJson<WorkerRefreshResponse>(response);
+
+      workerSnapshot = refreshed;
+      workerRefreshResult = refreshed.refresh;
+      heartbeatRevision += 1;
+      ensureSelectedModeIsAvailable(refreshed);
+    } catch (error) {
+      workerError = errorMessage(error);
+    } finally {
+      connectionRetrying = false;
+      workerLoading = false;
+    }
   }
 
   function clearJobResult(): void {
     pollRevision += 1;
+    clearSelectedPreview();
     selectedFile = null;
     queuedInference = null;
     currentJob = null;
@@ -247,6 +281,19 @@
     }).format(value);
   }
 
+  function failedJobMessage(job: InferenceJob): string {
+    if (job.reason === 'job_timeout') {
+      const missingWorkers = job.missing_worker_ids?.join(', ') ?? 'a worker';
+      return `The job timed out while waiting for ${missingWorkers}.`;
+    }
+
+    if (job.reason === 'worker_failed') {
+      return 'A worker returned an error while processing this image.';
+    }
+
+    return 'The job failed before all workers returned a successful result.';
+  }
+
   function orderedProbabilities(
     probabilities: Record<string, number> | null | undefined,
   ): [string, number][] {
@@ -265,17 +312,17 @@
 <main>
   <header class="page-header">
     <div>
-      <p class="eyebrow">CC Lab</p>
       <h1>Waste classification</h1>
-      <p class="summary">Submit one image and run it through the available inference workers.</p>
+      <p class="summary">Choose an image, select a mode, then send it to the available workers.</p>
     </div>
     <button
       class="secondary-button"
       type="button"
-      onclick={() => void refreshWorkers()}
-      disabled={workerLoading}
+      onclick={() => void retryWorkerConnection()}
+      disabled={workerLoading || connectionRetrying}
+      title="Recheck the Client-to-Master connection and the latest worker heartbeats."
     >
-      {workerLoading ? 'Refreshing…' : 'Refresh workers'}
+      {connectionRetrying ? 'Requesting heartbeat…' : 'Retry worker connection'}
     </button>
   </header>
 
@@ -286,11 +333,23 @@
     </section>
   {/if}
 
+  {#if workerRefreshResult}
+    <p class="refresh-result" role="status">
+      {#if workerRefreshResult.acknowledged_worker_ids.length > 0}
+        Fresh heartbeat: {workerRefreshResult.acknowledged_worker_ids.join(', ')}.
+      {:else}
+        No Worker acknowledged this heartbeat request.
+      {/if}
+      {#if workerRefreshResult.unresponsive_worker_ids.length > 0}
+        No reply within 3 seconds: {workerRefreshResult.unresponsive_worker_ids.join(', ')}.
+      {/if}
+    </p>
+  {/if}
+
   <div class="layout">
     <section class="panel workers-panel" aria-labelledby="workers-heading">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Capacity</p>
           <h2 id="workers-heading">Workers</h2>
         </div>
         {#if workerSnapshot}
@@ -322,7 +381,6 @@
     <section class="panel submit-panel" aria-labelledby="submit-heading">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Inference request</p>
           <h2 id="submit-heading">Choose a mode and image</h2>
         </div>
       </div>
@@ -358,12 +416,23 @@
         accept="image/jpeg,image/png,image/webp"
         bind:this={fileInput}
         onchange={handleFileChange}
+        disabled={submissionState !== 'idle'}
       />
       <p class="muted file-name" aria-live="polite">
         {selectedFile
           ? `${selectedFile.name} (${Math.ceil(selectedFile.size / 1024)} KB)`
           : 'Choose a JPG, PNG, or WebP image.'}
       </p>
+
+      {#if selectedPreviewUrl}
+        <figure class="image-preview">
+          <img
+            src={selectedPreviewUrl}
+            alt={`Preview of ${selectedFile?.name ?? 'selected image'}`}
+          />
+          <figcaption>The image is removed after all assigned Workers finish the job.</figcaption>
+        </figure>
+      {/if}
 
       <button
         class="primary-button"
@@ -395,7 +464,6 @@
   <section class="panel result-panel" aria-labelledby="result-heading">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Job result</p>
         <h2 id="result-heading">Inference status</h2>
       </div>
       <div class="result-actions">
@@ -451,7 +519,11 @@
               <span>{workerResult.status}</span>
               {#if workerResult.status === 'succeeded'}
                 <span>{workerResult.label}</span>
-                <span>{workerResult.elapsed_ms ?? '—'} ms</span>
+                <span>
+                  {workerResult.elapsed_ms === null
+                    ? 'Time not reported'
+                    : `${workerResult.elapsed_ms} ms`}
+                </span>
               {:else}
                 <span>{workerResult.error ?? 'Worker did not return a result.'}</span>
               {/if}
@@ -460,7 +532,7 @@
         </div>
       {:else if currentJob?.status === 'failed'}
         <div class="notice error-notice" role="alert">
-          The job failed before all workers returned a successful result.
+          {failedJobMessage(currentJob)}
         </div>
         <div class="worker-result-grid">
           {#each currentJob.worker_results as workerResult (workerResult.worker_id)}
@@ -488,7 +560,7 @@
 
 <style>
   main {
-    width: min(100% - 2rem, 70rem);
+    width: min(100% - 2rem, 66rem);
     margin: 0 auto;
     padding: 2rem 0 3rem;
   }
@@ -508,6 +580,12 @@
     margin-bottom: 1.5rem;
   }
 
+  .refresh-result {
+    margin: -0.75rem 0 1rem;
+    color: #4c5a6b;
+    font-size: 0.9rem;
+  }
+
   h1,
   h2,
   p {
@@ -515,26 +593,18 @@
   }
 
   h1 {
-    font-size: clamp(1.8rem, 4vw, 2.6rem);
-    letter-spacing: -0.04em;
+    color: #172231;
+    font-size: clamp(1.8rem, 4vw, 2.35rem);
+    letter-spacing: -0.03em;
   }
 
   h2 {
     font-size: 1.15rem;
   }
 
-  .eyebrow {
-    margin-bottom: 0.35rem;
-    color: #9fb3c8;
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
   .summary,
   .muted {
-    color: #aeb8c7;
+    color: #596575;
   }
 
   .summary {
@@ -552,9 +622,9 @@
 
   .panel,
   .notice {
-    border: 1px solid #303948;
-    border-radius: 0.75rem;
-    background: #181e29;
+    border: 1px solid #d4d9df;
+    border-radius: 0.5rem;
+    background: #ffffff;
   }
 
   .panel {
@@ -569,14 +639,14 @@
   }
 
   .error-notice {
-    border-color: #85484e;
-    color: #ffd9dc;
-    background: #351d24;
+    border-color: #c78b8d;
+    color: #762b31;
+    background: #fff5f5;
   }
 
   .availability-summary,
   .state-pill {
-    border-radius: 999px;
+    border-radius: 0.25rem;
     padding: 0.3rem 0.6rem;
     font-size: 0.78rem;
     font-weight: 700;
@@ -586,22 +656,22 @@
   .availability-summary,
   .state-pill.idle,
   .state-pill.succeeded {
-    color: #b4f2cb;
-    background: #133d2c;
+    color: #24663e;
+    background: #eaf6ee;
   }
 
   .state-pill.busy,
   .state-pill.reserved,
   .state-pill.queued,
   .state-pill.processing {
-    color: #ffe5aa;
-    background: #4b3918;
+    color: #77500d;
+    background: #fff4d7;
   }
 
   .state-pill.offline,
   .state-pill.failed {
-    color: #ffd9dc;
-    background: #54252d;
+    color: #8b2f35;
+    background: #fff0f0;
   }
 
   .worker-list,
@@ -616,7 +686,7 @@
   .worker-row {
     align-items: start;
     padding-bottom: 0.75rem;
-    border-bottom: 1px solid #303948;
+    border-bottom: 1px solid #e1e4e8;
   }
 
   .worker-row:last-child {
@@ -654,14 +724,14 @@
     gap: 0.75rem;
     align-items: flex-start;
     padding: 0.8rem;
-    border: 1px solid #3a4657;
-    border-radius: 0.55rem;
+    border: 1px solid #c7ced7;
+    border-radius: 0.35rem;
     cursor: pointer;
   }
 
   .mode-option:has(input:checked) {
-    border-color: #7ea9f9;
-    background: #182940;
+    border-color: #1769cc;
+    background: #f2f7ff;
   }
 
   .mode-option.disabled {
@@ -675,7 +745,7 @@
   }
 
   .mode-unavailable {
-    color: #ffd78d;
+    color: #80570e;
   }
 
   .file-label {
@@ -685,13 +755,35 @@
 
   input[type='file'] {
     width: 100%;
-    color: #cbd5e1;
+    color: #344255;
   }
 
   .file-name {
     min-height: 1.35rem;
     margin: 0.45rem 0 1rem;
     font-size: 0.85rem;
+  }
+
+  .image-preview {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0 0 1rem;
+  }
+
+  .image-preview img {
+    width: 100%;
+    max-height: 18rem;
+    aspect-ratio: 4 / 3;
+    border: 1px solid #c7ced7;
+    border-radius: 0.35rem;
+    object-fit: contain;
+    background: #f8f9fa;
+  }
+
+  .image-preview figcaption {
+    color: #596575;
+    font-size: 0.8rem;
+    line-height: 1.45;
   }
 
   button {
@@ -710,22 +802,22 @@
 
   .primary-button {
     width: 100%;
-    color: #07121f;
-    background: #9fc3ff;
+    color: #ffffff;
+    background: #1769cc;
   }
 
   .primary-button:not(:disabled):hover {
-    background: #c2d9ff;
+    background: #0f56aa;
   }
 
   .secondary-button {
-    color: #dce6f3;
-    border: 1px solid #465365;
-    background: transparent;
+    color: #263445;
+    border: 1px solid #aeb7c2;
+    background: #ffffff;
   }
 
   .secondary-button:not(:disabled):hover {
-    background: #242d3a;
+    background: #eef3f8;
   }
 
   .result-panel {
@@ -746,7 +838,7 @@
     display: grid;
     gap: 0.4rem;
     margin: 1rem 0;
-    color: #b7c3d3;
+    color: #4f5c6c;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.8rem;
     overflow-wrap: anywhere;
@@ -757,7 +849,7 @@
   }
 
   .prediction-label {
-    color: #aeb8c7;
+    color: #596575;
     font-size: 0.8rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -765,7 +857,7 @@
 
   .prediction-value {
     margin-top: 0.2rem;
-    color: #d7e6ff;
+    color: #163f76;
     font-size: clamp(1.6rem, 4vw, 2.3rem);
     font-weight: 800;
     text-transform: capitalize;
@@ -780,13 +872,13 @@
     height: 0.55rem;
     overflow: hidden;
     border-radius: 99px;
-    background: #303948;
+    background: #e0e5ea;
   }
 
   .probability-fill {
     height: 100%;
     border-radius: inherit;
-    background: #84b6ff;
+    background: #1769cc;
   }
 
   .worker-result-grid {
@@ -798,13 +890,13 @@
 
   .worker-result {
     padding: 0.8rem;
-    border: 1px solid #303948;
-    border-radius: 0.5rem;
-    color: #b7c3d3;
+    border: 1px solid #d4d9df;
+    border-radius: 0.35rem;
+    color: #4f5c6c;
   }
 
   .worker-result strong {
-    color: #eef4ff;
+    color: #1b2736;
   }
 
   @media (max-width: 46rem) {
