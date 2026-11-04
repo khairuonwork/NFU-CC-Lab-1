@@ -1,6 +1,7 @@
 import asyncio
 
 from app.core.config import get_settings
+from app.services.control_consumer import consume_worker_controls
 from app.services.heartbeat import WorkerRuntime, run_heartbeat_loop
 from app.services.job_consumer import consume_inference_jobs
 from app.services.model_runtime import create_model_runtime
@@ -18,6 +19,10 @@ async def run_worker() -> None:
         run_heartbeat_loop(redis, settings, runtime),
         name="worker-heartbeat",
     )
+    control_task = asyncio.create_task(
+        consume_worker_controls(redis, settings, runtime),
+        name="worker-control-consumer",
+    )
 
     try:
         await consume_inference_jobs(
@@ -29,8 +34,13 @@ async def run_worker() -> None:
         )
     finally:
         heartbeat_task.cancel()
+        control_task.cancel()
         try:
             await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await control_task
         except asyncio.CancelledError:
             pass
         await redis.aclose()
